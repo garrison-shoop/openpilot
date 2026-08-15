@@ -24,8 +24,14 @@ USB_HOLDING_ROOT = {"path": "/dev/sdb", "type": "disk", "rm": True, "tran": "usb
   {"path": "/dev/sdb1", "type": "part", "fstype": "ext4", "label": "x", "mountpoint": "/"}]}
 
 
-def probe_with(monkeypatch, devices, ismount=False, rc=0):
-  monkeypatch.setattr(es, "_run", lambda cmd, timeout: (rc, lsblk(devices)))
+def probe_with(monkeypatch, devices, ismount=False, rc=0, blkid=None):
+  """blkid: {partition_path: "TYPE=ext4\\nLABEL=openpilot"} for the superblock fallback."""
+  def fake_run(cmd, timeout):
+    if cmd.startswith("sudo blkid"):
+      part = cmd.split()[-1]
+      return (0, (blkid or {}).get(part, "")) if blkid and part in blkid else (2, "")
+    return rc, lsblk(devices)
+  monkeypatch.setattr(es, "_run", fake_run)
   monkeypatch.setattr(os.path, "ismount", lambda p: ismount)
   monkeypatch.setattr(os, "statvfs", lambda p: SimpleNamespace(f_blocks=1000, f_frsize=1024 ** 2, f_bfree=400))
   return es._probe()
@@ -95,6 +101,69 @@ class TestProbe:
   def test_malformed_json_degrades_to_no_drive(self, monkeypatch):
     monkeypatch.setattr(es, "_run", lambda cmd, timeout: (0, "not json{"))
     assert es._probe().state == es.StorageState.NO_DRIVE
+
+
+class TestBlkidFallback:
+  """AGNOS often leaves lsblk's LABEL/FSTYPE blank for hot-plugged USB, which made a successfully
+  formatted drive keep reporting 'needs format'. blkid probes the superblock directly."""
+
+  # lsblk sees the partition but reports no fs metadata at all
+  BLANK_LSBLK = {"path": "/dev/sdg", "type": "disk", "rm": True, "tran": "usb", "children": [
+    {"path": "/dev/sdg1", "type": "part", "fstype": None, "label": None}]}
+
+  def test_blank_lsblk_falls_back_to_blkid(self, monkeypatch):
+    r = probe_with(monkeypatch, [self.BLANK_LSBLK],
+                   blkid={"/dev/sdg1": "TYPE=ext4\nLABEL=openpilot\nUUID=abc"})
+    assert r.state == es.StorageState.READY
+    assert r.partition == "/dev/sdg1"
+
+  def test_blkid_mounted_reports_usage(self, monkeypatch):
+    r = probe_with(monkeypatch, [self.BLANK_LSBLK], ismount=True,
+                   blkid={"/dev/sdg1": "TYPE=ext4\nLABEL=openpilot"})
+    assert r.state == es.StorageState.MOUNTED
+
+  def test_blkid_wrong_label_still_needs_format(self, monkeypatch):
+    r = probe_with(monkeypatch, [self.BLANK_LSBLK],
+                   blkid={"/dev/sdg1": "TYPE=ext4\nLABEL=SANDISK"})
+    assert r.state == es.StorageState.NEEDS_FORMAT
+
+  def test_blkid_unavailable_still_needs_format(self, monkeypatch):
+    r = probe_with(monkeypatch, [self.BLANK_LSBLK], blkid=None)
+    assert r.state == es.StorageState.NEEDS_FORMAT
+
+  def test_blkid_parses_export_format(self, monkeypatch):
+    monkeypatch.setattr(es, "_run", lambda cmd, timeout: (0, "DEVNAME=/dev/sdg1\nLABEL=openpilot\nTYPE=ext4"))
+    assert es._blkid_fs("/dev/sdg1") == ("ext4", "openpilot")
+
+  def test_blkid_failure_returns_empty(self, monkeypatch):
+    monkeypatch.setattr(es, "_run", lambda cmd, timeout: (2, ""))
+    assert es._blkid_fs("/dev/sdg1") == ("", "")
+
+
+class TestTruthy:
+  """lsblk -J emits rm/hotplug as real bools on new util-linux, "0"/"1" strings on old."""
+
+  def test_string_zero_is_false(self):
+    # bool("0") is True in Python -- the whole reason this helper exists
+    assert not es._truthy("0")
+
+  def test_string_one_is_true(self):
+    assert es._truthy("1")
+
+  def test_bools_pass_through(self):
+    assert es._truthy(True)
+    assert not es._truthy(False)
+
+  def test_none_is_false(self):
+    assert not es._truthy(None)
+
+  def test_string_rm_zero_disk_not_selected_without_usb(self):
+    # old lsblk reporting rm="0" must not make an internal disk look removable
+    node = {"path": "/dev/mmcblk0", "type": "disk", "rm": "0", "tran": "mmc"}
+    assert not es._is_safe_disk(node)
+
+  def test_string_rm_one_disk_selected(self):
+    assert es._is_safe_disk({"path": "/dev/sdg", "type": "disk", "rm": "1", "tran": None})
 
 
 class TestHelpers:

@@ -83,13 +83,43 @@ class ProbeResult:
 
 
 def _run(cmd: str, timeout: float) -> tuple[int, str]:
-  """Runs ``cmd`` under sh, returning (returncode, stdout). Never raises."""
+  """Runs ``cmd`` under sh, returning (returncode, output). Never raises.
+
+  stderr is merged into the returned output: mkfs/parted/wipefs report their real failure reason
+  there, and discarding it left the previous version with nothing to log but "it failed".
+  """
   try:
-    p = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True, timeout=timeout, check=False)
+    p = subprocess.run(["sh", "-c", cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                       text=True, timeout=timeout, check=False)
     return p.returncode, p.stdout.strip()
   except (subprocess.SubprocessError, OSError):
     cloudlog.exception(f"external_storage: command failed: {cmd}")
     return 1, ""
+
+
+def _truthy(value) -> bool:
+  """lsblk -J emits booleans as real bools on new util-linux and as "0"/"1" strings on old ones.
+  bool("0") is True, so the string form has to be handled explicitly."""
+  if isinstance(value, bool):
+    return value
+  if isinstance(value, int | float):
+    return bool(value)
+  return str(value).strip().lower() in ("1", "true", "yes")
+
+
+def _blkid_fs(partition: str) -> tuple[str, str]:
+  """(fstype, label) read straight off the device with blkid, returning ("", "") on failure.
+
+  lsblk's LABEL/FSTYPE columns come from the udev database, which on AGNOS is frequently empty for
+  a hot-plugged USB drive (and for non-root callers), so a freshly formatted drive can look
+  unformatted. blkid probes the superblock directly. This is the same check comma's original Qt
+  widget used, and the reason it used sudo.
+  """
+  rc, out = _run(f"sudo blkid -o export {partition}", CMD_TIMEOUT)
+  if rc != 0:
+    return "", ""
+  fields = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+  return fields.get("TYPE", ""), fields.get("LABEL", "")
 
 
 def _human(num_bytes: float) -> str:
@@ -120,8 +150,7 @@ def _is_safe_disk(node: dict) -> bool:
   if node.get("type") != "disk":
     return False
   # `rm` (removable) or a USB transport -- either is enough to call it external.
-  removable = bool(node.get("rm")) or str(node.get("rm")).lower() == "true"
-  if not (removable or (node.get("tran") or "").lower() == "usb"):
+  if not (_truthy(node.get("rm")) or (node.get("tran") or "").lower() == "usb"):
     return False
   return all(mp not in PROTECTED_MOUNTS for mp in _node_mountpoints(node))
 
@@ -143,8 +172,17 @@ def _probe() -> ProbeResult:
     return ProbeResult()
 
   disk_path = disk.get("path")
-  partition = next((c.get("path") for c in (disk.get("children") or [])
+  children = [c for c in (disk.get("children") or []) if c.get("type") == "part" and c.get("path")]
+
+  # Trust lsblk when it has the answer; otherwise probe the superblock. See _blkid_fs.
+  partition = next((c["path"] for c in children
                     if c.get("fstype") == "ext4" and c.get("label") == FS_LABEL), None)
+  if partition is None:
+    for child in children:
+      fstype, label = _blkid_fs(child["path"])
+      if fstype == "ext4" and label == FS_LABEL:
+        partition = child["path"]
+        break
 
   if partition is None:
     return ProbeResult(state=StorageState.NEEDS_FORMAT, disk=disk_path)
@@ -306,7 +344,7 @@ class ExternalStorageControl:
 
   def _mount_worker(self) -> None:
     # The trap guarantees the AGNOS rootfs goes back to read-only even if a step below fails.
-    rc, _ = _run(f"""set -e
+    rc, out = _run(f"""set -e
 trap 'sudo mount -o remount,ro / >/dev/null 2>&1 || true' EXIT
 sudo mount -o remount,rw /
 sudo mkdir -p {MOUNT_POINT}
@@ -317,12 +355,12 @@ sudo chown -R comma:comma {MOUNT_POINT}
 sudo chmod -R 775 {MOUNT_POINT}
 """, ACTION_TIMEOUT)
     if rc != 0:
-      cloudlog.error("external_storage: mount failed")
+      cloudlog.error(f"external_storage: mount failed (rc={rc}): {out}")
 
   def _unmount_worker(self) -> None:
-    rc, _ = _run(f"sudo umount {MOUNT_POINT}", ACTION_TIMEOUT)
+    rc, out = _run(f"sudo umount {MOUNT_POINT}", ACTION_TIMEOUT)
     if rc != 0:
-      cloudlog.error("external_storage: unmount failed")
+      cloudlog.error(f"external_storage: unmount failed (rc={rc}): {out}")
 
   def _format_worker(self) -> None:
     # Re-probe rather than trusting the cached disk: this is the destructive path, and the drive
@@ -333,23 +371,29 @@ sudo chmod -R 775 {MOUNT_POINT}
       cloudlog.error("external_storage: refusing to format, no safe external disk found")
       return
 
-    # The trailing sleep lets udev create the new partition node before mkfs looks for it.
-    rc, _ = _run(f"""set -e
+    # Unmount every partition on the disk, not just our mountpoint: wipefs/parted fail with EBUSY
+    # if anything on the device is still mounted (AGNOS or a stale fstab entry may have taken it).
+    # The settle/sleep gives udev time to create the new partition node before mkfs looks for it.
+    rc, out = _run(f"""set -e
+for part in $(lsblk -ln -o PATH {disk} | tail -n +2); do sudo umount "$part" >/dev/null 2>&1 || true; done
 sudo umount {MOUNT_POINT} >/dev/null 2>&1 || true
 sudo wipefs -a {disk}
 sudo parted -s {disk} mklabel gpt mkpart primary ext4 0% 100%
 sudo partprobe {disk} >/dev/null 2>&1 || true
+sudo udevadm settle >/dev/null 2>&1 || true
 sleep 2
 """, ACTION_TIMEOUT)
     if rc != 0:
-      cloudlog.error("external_storage: partitioning failed")
+      cloudlog.error(f"external_storage: partitioning failed (rc={rc}): {out}")
       return
 
     partition = _partition_of(disk)
-    rc, _ = _run(f"sudo mkfs.ext4 -F -L {FS_LABEL} {partition}", ACTION_TIMEOUT)
+    rc, out = _run(f"sudo mkfs.ext4 -F -L {FS_LABEL} {partition} && sudo udevadm settle >/dev/null 2>&1 || true",
+                   ACTION_TIMEOUT)
     if rc != 0:
-      cloudlog.error("external_storage: mkfs failed")
+      cloudlog.error(f"external_storage: mkfs failed on {partition} (rc={rc}): {out}")
       return
+    cloudlog.warning(f"external_storage: formatted {partition} as {FS_LABEL}")
 
     # Match the Qt original: a successful format rolls straight into mounting.
     self._mount_worker()
