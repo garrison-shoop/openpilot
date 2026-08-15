@@ -17,6 +17,7 @@ from openpilot.common.bluepilot import is_bluepilot
 from openpilot.selfdrive.ui.sunnypilot.ui_state import UIStateSP, DeviceSP
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
+LTSSM_L0 = 0x78  # PCIe link trained and up (see chestnut/flash.py link_up)
 PARAM_UPDATE_TIME = 1 / 5.0
 
 
@@ -85,6 +86,7 @@ class UIState(UIStateSP):
     self.experimental_mode: bool = self.params.get_bool("ExperimentalMode")
     self.usbgpu: bool = self.params.get_bool("UsbGpuPresent")
     self.usbgpu_compiled: bool = self.params.get_bool("UsbGpuCompiled")
+    self.chestnut_link_up: bool = False
     self.started: bool = False
     self.ignition: bool = False
     self.recording_audio: bool = False
@@ -165,7 +167,15 @@ class UIState(UIStateSP):
 
     # chestnut presence is published live by hardwared, so this tracks hotplug offroad too. Stay
     # latched while onroad: modeld holds the device open, which can hide it from the USB scan.
+    # NOTE: this is the ASM bridge enumerating -- it says nothing about a GPU being in the dock.
     self.usbgpu = self.sm["deviceState"].chestnutPresent or (self.usbgpu and self.started)
+
+    # Whether a GPU is actually seated and its PCIe link trained. hardwared probes this while
+    # modeld is idle; once modeld owns the device it reports the LTSSM in chestnutState instead.
+    link = self.sm["deviceState"].chestnutLinkUp
+    if self.sm.alive["chestnutState"] and self.sm.valid["chestnutState"]:
+      link = link or self.sm["chestnutState"].pcieLtssm == LTSSM_L0
+    self.chestnut_link_up = self.usbgpu and link
 
     # Update body state
     if self.CP is not None and self.is_body != self.CP.notCar:

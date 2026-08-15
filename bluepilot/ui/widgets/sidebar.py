@@ -558,12 +558,20 @@ class SidebarBP(Widget):
     if 'fan' in self._button_rects:
       self._fan_widget.render(self._button_rects['fan'])
 
-    # eGPU (chestnut) indicator -- only shown when a chestnut is actually attached. Solid once the
-    # big model is compiled and in use, grayed while it is attached but not yet built against.
+    # eGPU (chestnut) indicator. Three states, because the dock enumerating over USB says nothing
+    # about a GPU being in it:
+    #   grey   - dock detected, no PCIe link (empty dock, or card not seated/powered)
+    #   yellow - GPU attached and linked, but the big model is not compiled yet
+    #   green  - linked and running the big model
     if ui_state.usbgpu and self._egpu_rect is not None:
-      icon = gui_app.texture(f"icons_mici/egpu{'' if ui_state.usbgpu_compiled else '_gray'}.png",
-                             BPConstants.EGPU_WIDTH, BPConstants.EGPU_HEIGHT)
-      rl.draw_texture_ex(icon, rl.Vector2(self._egpu_rect.x, self._egpu_rect.y), 0.0, 1.0, rl.WHITE)
+      if not ui_state.chestnut_link_up:
+        tint = BPColors.DISABLED
+      elif not ui_state.usbgpu_compiled:
+        tint = BPColors.WARNING
+      else:
+        tint = BPColors.GOOD
+      icon = gui_app.texture("icons_mici/egpu.png", BPConstants.EGPU_WIDTH, BPConstants.EGPU_HEIGHT)
+      rl.draw_texture_ex(icon, rl.Vector2(self._egpu_rect.x, self._egpu_rect.y), 0.0, 1.0, tint)
 
     # Draw buttons dynamically stacked from bottom up (no gaps)
     btn_size = BPConstants.BUTTON_SIZE

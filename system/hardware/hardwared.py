@@ -45,17 +45,49 @@ class Chestnut:
   MAX_ATTEMPTS = 3
   RETRY_INTERVAL = 20.
 
+  LINK_PROBE_INTERVAL = 5.
+
   def __init__(self):
     self.thread: threading.Thread | None = None
     self.attempts = 0
     self.last_attempt = 0.
     self.flashed = False
+    # BluePilot: PCIe link state, i.e. whether a GPU is actually in the dock. Distinct from
+    # chestnutPresent, which only means the ASM bridge enumerated over USB.
+    self.link_up = False
+    self._link_thread: threading.Thread | None = None
+    self._last_link_probe = 0.
 
   def flash(self) -> None:
     ret = subprocess.run(["sudo", sys.executable, os.path.join(BASEDIR, "system/hardware/chestnut/flash.py"), CHESTNUT_FW_VERSION],
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=False)
     cloudlog.event("chestnut flash done", returncode=ret.returncode, output=ret.stdout[-1000:], error=ret.returncode != 0)
     self.flashed = ret.returncode == 0
+
+  def _probe_link(self) -> None:
+    ret = subprocess.run(["sudo", sys.executable, os.path.join(BASEDIR, "system/hardware/chestnut/flash.py"), "--link-up"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    self.link_up = ret.returncode == 0
+
+  def update_link(self, present: bool, big_model_loaded: bool) -> None:
+    """Probe the PCIe link, but only while modeld is not driving the GPU.
+
+    Only modeld may touch the chestnut once it has the big model open, so this is skipped whenever
+    the model is loaded -- in that case modeld publishes the LTSSM in chestnutState instead. Runs
+    off-thread because it shells out to root.
+    """
+    if not present or big_model_loaded:
+      if not present:
+        self.link_up = False
+      return
+    if self._link_thread is not None and self._link_thread.is_alive():
+      return
+    if time.monotonic() - self._last_link_probe < self.LINK_PROBE_INTERVAL:
+      return
+
+    self._last_link_probe = time.monotonic()
+    self._link_thread = threading.Thread(target=self._probe_link, daemon=True)
+    self._link_thread.start()
 
   def update(self, offroad: bool, usb_state: list[dict]) -> None:
     mismatch = any((d["vendorId"], d["productId"]) in CHESTNUT_USB_IDS + CHESTNUT_ROM_USB_IDS and
@@ -310,6 +342,8 @@ def hardware_thread(end_event, hw_queue) -> None:
 
     set_usb_state(msg.deviceState, last_hw_state.usb_state)
     chestnut.update(started_ts is None, last_hw_state.usb_state)
+    chestnut.update_link(msg.deviceState.chestnutPresent, params.get_bool("UsbGpuCompiled"))
+    msg.deviceState.chestnutLinkUp = chestnut.link_up
 
     # this subset is only used for offroad
     temp_sources = [

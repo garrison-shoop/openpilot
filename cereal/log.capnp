@@ -417,6 +417,9 @@ struct DeviceState @0xa4d8b5af2aa492eb {
   # usb
   chestnutPresent @51 :Bool;
   usbState @52 :UsbState;
+  # BluePilot: chestnutPresent only means the ASM bridge enumerated. This is the PCIe link, i.e.
+  # whether a GPU is actually seated and trained. Probed by hardwared while modeld is not using it.
+  chestnutLinkUp @53 :Bool;
 
   networkType @22 :NetworkType;
   networkInfo @31 :NetworkInfo;

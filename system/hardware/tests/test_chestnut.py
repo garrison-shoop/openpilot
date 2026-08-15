@@ -98,6 +98,68 @@ class TestFlashDecision:
     assert not c.flashed, "latch must clear so a later hotplug can flash again"
 
 
+class TestLinkProbe:
+  """chestnutPresent only means the ASM bridge enumerated. The PCIe link is what tells an empty
+  dock from one with a GPU in it, and only modeld may touch the device once the model is loaded."""
+
+  def make(self, link_result=True):
+    c = FakeChestnut()
+    c.probe_calls = 0
+
+    def fake_probe():
+      c.probe_calls += 1
+      c.link_up = link_result
+    c._probe_link = fake_probe
+    return c
+
+  def drive_link(self, c, present, big_loaded, ticks=1):
+    for _ in range(ticks):
+      c.update_link(present, big_loaded)
+      if c._link_thread is not None:
+        c._link_thread.join(timeout=5)
+
+  def test_probes_when_present_and_model_not_loaded(self):
+    c = self.make()
+    self.drive_link(c, True, False)
+    assert c.probe_calls == 1
+    assert c.link_up
+
+  def test_never_probes_while_model_loaded(self):
+    # modeld holds the device exclusively once the big model is open
+    c = self.make()
+    self.drive_link(c, True, True, ticks=5)
+    assert c.probe_calls == 0
+
+  def test_no_probe_without_a_dock(self):
+    c = self.make()
+    self.drive_link(c, False, False, ticks=5)
+    assert c.probe_calls == 0
+
+  def test_unplug_clears_link(self):
+    c = self.make()
+    self.drive_link(c, True, False)
+    assert c.link_up
+    self.drive_link(c, False, False)
+    assert not c.link_up, "link must not stay latched after the dock disappears"
+
+  def test_probe_is_throttled(self):
+    c = self.make()
+    self.drive_link(c, True, False, ticks=5)
+    assert c.probe_calls == 1, "should respect LINK_PROBE_INTERVAL"
+
+  def test_probe_repeats_after_interval(self):
+    c = self.make()
+    self.drive_link(c, True, False)
+    c._last_link_probe -= Chestnut.LINK_PROBE_INTERVAL + 1
+    self.drive_link(c, True, False)
+    assert c.probe_calls == 2
+
+  def test_empty_dock_reports_no_link(self):
+    c = self.make(link_result=False)
+    self.drive_link(c, True, False)
+    assert not c.link_up
+
+
 class TestUsbIds:
   def test_rom_and_runtime_ids_are_disjoint(self):
     assert not set(CHESTNUT_USB_IDS) & set(CHESTNUT_ROM_USB_IDS)
