@@ -79,6 +79,11 @@ class SidebarBP(Widget):
     self._memory_usage = "0%"
     self._fan_demand = "0%"
 
+    # eGPU (chestnut) -- replaces the integrated GPU card while one is attached
+    self._egpu_usage = "N/A"
+    self._egpu_temp = "N/A"
+    self._egpu_reporting = False
+
     # Status values
     self._panda_status = ("VEHICLE", "ONLINE", BPColors.GOOD)
     self._connect_status = ("CONNECT", "OFFLINE", BPColors.WARNING)
@@ -310,6 +315,43 @@ class SidebarBP(Widget):
     except Exception:
       self._panda_status = ("VEHICLE", "OFFLINE", BPColors.DANGER)
 
+  def _update_egpu_metrics(self):
+    """Read chestnutState, which only modeld publishes and only once the big model is running.
+
+    An attached-but-not-yet-compiled chestnut therefore reports nothing -- the same state the gray
+    eGPU icon indicates -- so the card shows N/A rather than stale or zeroed numbers.
+    """
+    sm = ui_state.sm
+    self._egpu_reporting = bool(sm.alive.get('chestnutState') and sm.valid.get('chestnutState'))
+    if not self._egpu_reporting:
+      self._egpu_usage = "N/A"
+      self._egpu_temp = "N/A"
+      return
+
+    try:
+      state = sm['chestnutState']
+      self._egpu_usage = f"{state.gpuUsagePercent:.0f}%"
+      # tempC is the hotspot (junction) sensor, which runs well above the edge temperature
+      self._egpu_temp = f"{state.tempC:.1f}°C"
+    except Exception:
+      self._egpu_usage = "N/A"
+      self._egpu_temp = "N/A"
+      self._egpu_reporting = False
+
+  def _egpu_color(self):
+    if not self._egpu_reporting:
+      return BPColors.DISABLED
+    try:
+      # hotspot thresholds, not edge: AMD parts idle in the 50s and sit in the 80s under load
+      temp_val = float(self._egpu_temp.replace("°C", ""))
+      if temp_val > 100:
+        return BPColors.DANGER
+      if temp_val > 90:
+        return BPColors.WARNING
+    except ValueError:
+      pass
+    return BPColors.GOOD
+
   def _update_performance_metrics(self, device_state):
     """Update CPU, GPU, Memory metrics at reduced rate"""
     self._metrics_counter += 1
@@ -341,6 +383,8 @@ class SidebarBP(Widget):
 
       gpu_usage = device_state.gpuUsagePercent
       self._gpu_usage = f"{gpu_usage:.0f}%"
+
+      self._update_egpu_metrics()
 
       # Memory
       mem_usage = device_state.memoryUsagePercent
@@ -393,17 +437,20 @@ class SidebarBP(Widget):
       pass
     self._cpu_card.set_data(MetricData("CPU", "", self._cpu_usage, self._cpu_temp, cpu_color))
 
-    # GPU card
-    gpu_color = BPColors.GOOD
-    try:
-      temp_val = float(self._gpu_temp.replace("\u00b0C", ""))
-      if temp_val > 75:
-        gpu_color = BPColors.DANGER
-      elif temp_val > 65:
-        gpu_color = BPColors.WARNING
-    except ValueError:
-      pass
-    self._gpu_card.set_data(MetricData("GPU", "", self._gpu_usage, self._gpu_temp, gpu_color))
+    # GPU card -- shows the eGPU instead of the integrated GPU whenever a chestnut is attached
+    if ui_state.usbgpu:
+      self._gpu_card.set_data(MetricData("EGPU", "", self._egpu_usage, self._egpu_temp, self._egpu_color()))
+    else:
+      gpu_color = BPColors.GOOD
+      try:
+        temp_val = float(self._gpu_temp.replace("\u00b0C", ""))
+        if temp_val > 75:
+          gpu_color = BPColors.DANGER
+        elif temp_val > 65:
+          gpu_color = BPColors.WARNING
+      except ValueError:
+        pass
+      self._gpu_card.set_data(MetricData("GPU", "", self._gpu_usage, self._gpu_temp, gpu_color))
 
     # Memory card
     mem_color = BPColors.GOOD
@@ -513,7 +560,7 @@ class SidebarBP(Widget):
 
     # eGPU (chestnut) indicator -- only shown when a chestnut is actually attached. Solid once the
     # big model is compiled and in use, grayed while it is attached but not yet built against.
-    if self._egpu_rect is not None:
+    if ui_state.usbgpu and self._egpu_rect is not None:
       icon = gui_app.texture(f"icons_mici/egpu{'' if ui_state.usbgpu_compiled else '_gray'}.png",
                              BPConstants.EGPU_WIDTH, BPConstants.EGPU_HEIGHT)
       rl.draw_texture_ex(icon, rl.Vector2(self._egpu_rect.x, self._egpu_rect.y), 0.0, 1.0, rl.WHITE)
