@@ -513,7 +513,7 @@ class SidebarBP(Widget):
 
     # eGPU (chestnut) indicator -- only shown when a chestnut is actually attached. Solid once the
     # big model is compiled and in use, grayed while it is attached but not yet built against.
-    if ui_state.usbgpu and self._egpu_rect is not None:
+    if self._egpu_rect is not None:
       icon = gui_app.texture(f"icons_mici/egpu{'' if ui_state.usbgpu_compiled else '_gray'}.png",
                              BPConstants.EGPU_WIDTH, BPConstants.EGPU_HEIGHT)
       rl.draw_texture_ex(icon, rl.Vector2(self._egpu_rect.x, self._egpu_rect.y), 0.0, 1.0, rl.WHITE)
