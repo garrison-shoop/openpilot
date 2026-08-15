@@ -62,6 +62,10 @@ FSTAB_LINE = f"{FSTAB_SPEC} {MOUNT_POINT} ext4 defaults,nofail 0 2"
 # hold any of these, but formatting is unrecoverable so the check is cheap insurance.
 PROTECTED_MOUNTS = ("/", "/boot", "/data", "/system", "/usr", "/var", "[SWAP]")
 
+# type=disk nodes that are never a valid target regardless of transport or mountpoint
+NEVER_TARGET_PREFIXES = ("/dev/loop", "/dev/ram", "/dev/zram", "/dev/md", "/dev/dm-")
+NEVER_TARGET_SUFFIXES = ("boot0", "boot1", "rpmb")
+
 REFRESH_INTERVAL = 2.0  # s, between background probes while the panel is on screen
 CMD_TIMEOUT = 10.0      # s, for probe commands
 ACTION_TIMEOUT = 300.0  # s, mkfs on a large slow USB drive is not quick
@@ -145,19 +149,94 @@ def _node_mountpoints(node: dict) -> list[str]:
   return points
 
 
+def _flatten(nodes: list[dict]) -> list[dict]:
+  out: list[dict] = []
+  for node in nodes:
+    out.append(node)
+    out.extend(_flatten(node.get("children") or []))
+  return out
+
+
+def _normalize_devices(raw: list[dict]) -> list[dict]:
+  """Return the disks, each with a populated ``children`` list.
+
+  ``lsblk -J`` nests partitions under ``children`` in tree mode, but some builds emit every node
+  flat in the top-level array instead -- AGNOS does. Without rebuilding the relationship a disk
+  looks partitionless, so a formatted drive reads as 'needs format' forever, and (worse) a disk
+  whose partitions hold / and /data looks like it holds no protected mountpoint at all.
+  """
+  nodes = _flatten(raw)
+  disks = [n for n in nodes if n.get("type") == "disk"]
+  by_path = {d["path"]: d for d in disks if d.get("path")}
+
+  for disk in disks:
+    disk["children"] = list(disk.get("children") or [])
+
+  for part in (n for n in nodes if n.get("type") == "part"):
+    path = part.get("path") or ""
+    parent = by_path.get(f"/dev/{part['pkname']}") if part.get("pkname") else None
+    if parent is None:
+      # longest disk path that prefixes this one: /dev/sdg1 -> /dev/sdg, /dev/nvme0n1p1 -> /dev/nvme0n1
+      prefixes = [p for p in by_path if path.startswith(p) and path != p]
+      if prefixes:
+        parent = by_path[max(prefixes, key=len)]
+    if parent is not None and not any(c.get("path") == path for c in parent["children"]):
+      parent["children"].append(part)
+
+  return disks
+
+
+def _size_of(node: dict) -> int:
+  try:
+    return int(node.get("size") or 0)
+  except (TypeError, ValueError):
+    return 0
+
+
 def _is_safe_disk(node: dict) -> bool:
   """True only for a whole disk that is external and holds nothing the system depends on."""
   if node.get("type") != "disk":
     return False
-  # `rm` (removable) or a USB transport -- either is enough to call it external.
-  if not (_truthy(node.get("rm")) or (node.get("tran") or "").lower() == "usb"):
+
+  path = node.get("path") or ""
+  # These are type=disk but never a valid target. eMMC boot/rpmb areas in particular have no
+  # mountpoint, so nothing else here would exclude them.
+  if path.startswith(NEVER_TARGET_PREFIXES) or path.endswith(NEVER_TARGET_SUFFIXES):
     return False
+
+  # A USB-to-NVMe enclosure reports rm=false -- the NVMe inside is not "removable media" -- so the
+  # transport is what marks it external. rm alone still covers plain thumb drives.
+  if (node.get("tran") or "").lower() != "usb" and not _truthy(node.get("rm")):
+    return False
+
   return all(mp not in PROTECTED_MOUNTS for mp in _node_mountpoints(node))
+
+
+def _pick_disk(devices: list[dict]) -> dict | None:
+  """Choose deterministically among safe disks.
+
+  A comma has many block devices, and taking the first match meant an unrelated disk could shadow
+  the real drive: the panel would report 'needs format' for something that was never the target,
+  and the FORMAT button would aim wipefs at it. Prefer, in order: the disk already holding our
+  labelled filesystem, then USB transport, then one that has partitions at all, then the largest.
+  Path breaks ties so the choice is stable across polls.
+  """
+  candidates = [d for d in devices if _is_safe_disk(d)]
+  if not candidates:
+    return None
+
+  def rank(d: dict):
+    labelled = any(c.get("label") == FS_LABEL for c in (d.get("children") or []))
+    usb = (d.get("tran") or "").lower() == "usb"
+    has_partitions = bool(d.get("children"))
+    return (not labelled, not usb, not has_partitions, -_size_of(d), d.get("path") or "")
+
+  return sorted(candidates, key=rank)[0]
 
 
 def _probe() -> ProbeResult:
   """Single lsblk call + stat syscalls. Safe to run off the UI thread every REFRESH_INTERVAL."""
-  rc, out = _run("lsblk -J -o PATH,TYPE,RM,TRAN,LABEL,FSTYPE,MOUNTPOINT", CMD_TIMEOUT)
+  rc, out = _run("lsblk -J -b -o PATH,PKNAME,TYPE,RM,TRAN,SIZE,LABEL,FSTYPE,MOUNTPOINT", CMD_TIMEOUT)
   if rc != 0 or not out:
     return ProbeResult()
 
@@ -167,7 +246,7 @@ def _probe() -> ProbeResult:
     cloudlog.exception("external_storage: could not parse lsblk output")
     return ProbeResult()
 
-  disk = next((d for d in devices if _is_safe_disk(d)), None)
+  disk = _pick_disk(_normalize_devices(devices))
   if disk is None:
     return ProbeResult()
 
@@ -203,13 +282,14 @@ def _probe() -> ProbeResult:
 
 def _partition_of(disk: str) -> str:
   """First partition path for a freshly-partitioned disk, re-read from lsblk when possible."""
-  rc, out = _run(f"lsblk -J -o PATH,TYPE {disk}", CMD_TIMEOUT)
+  rc, out = _run(f"lsblk -J -o PATH,PKNAME,TYPE {disk}", CMD_TIMEOUT)
   if rc == 0 and out:
     try:
-      for dev in json.loads(out).get("blockdevices") or []:
-        for child in dev.get("children") or []:
-          if child.get("type") == "part":
-            return child["path"]
+      # tolerate both the nested and flat lsblk shapes -- see _normalize_devices
+      parts = [n for n in _flatten(json.loads(out).get("blockdevices") or [])
+               if n.get("type") == "part" and n.get("path")]
+      if parts:
+        return sorted(parts, key=lambda n: n["path"])[0]["path"]
     except (ValueError, AttributeError, KeyError):
       pass
   # nvme/mmc use a `p` separator; USB sd* does not
@@ -370,6 +450,7 @@ sudo chmod -R 775 {MOUNT_POINT}
     if disk is None or result.state == StorageState.NO_DRIVE:
       cloudlog.error("external_storage: refusing to format, no safe external disk found")
       return
+    cloudlog.warning(f"external_storage: formatting {disk} (state={result.state.name})")
 
     # Unmount every partition on the disk, not just our mountpoint: wipefs/parted fail with EBUSY
     # if anything on the device is still mounted (AGNOS or a stale fstab entry may have taken it).

@@ -103,6 +103,161 @@ class TestProbe:
     assert es._probe().state == es.StorageState.NO_DRIVE
 
 
+class TestFlatLsblkShape:
+  """AGNOS's lsblk -J emits every node flat in blockdevices instead of nesting partitions under
+  'children'. That made every disk look partitionless: a formatted drive read as 'needs format'
+  forever, and a disk holding / and /data looked like it held no protected mountpoint at all.
+  """
+
+  # exactly the shape reported from the device
+  FLAT = [
+    {"path": "/dev/sdg", "pkname": None, "type": "disk", "rm": False, "tran": "usb", "size": 1024 ** 4},
+    {"path": "/dev/sdg1", "pkname": "sdg", "type": "part", "rm": False, "tran": None,
+     "fstype": "ext4", "label": "openpilot", "mountpoint": "/mnt/external_realdata"},
+  ]
+
+  def test_flat_partitions_are_reattached(self):
+    disks = es._normalize_devices(self.FLAT)
+    assert len(disks) == 1
+    assert [c["path"] for c in disks[0]["children"]] == ["/dev/sdg1"]
+
+  def test_flat_formatted_drive_reports_mounted_not_needs_format(self, monkeypatch):
+    r = probe_with(monkeypatch, self.FLAT, ismount=True)
+    assert r.state == es.StorageState.MOUNTED, "the reported bug: formatted drive stuck on NEEDS_FORMAT"
+    assert r.partition == "/dev/sdg1"
+
+  def test_flat_reattaches_without_pkname_via_path_prefix(self):
+    flat = [dict(n, pkname=None) for n in self.FLAT]
+    disks = es._normalize_devices(flat)
+    assert [c["path"] for c in disks[0]["children"]] == ["/dev/sdg1"]
+
+  def test_flat_protected_mounts_still_seen(self):
+    # without reattaching, mmcblk0 would look like it holds nothing and become a format candidate
+    flat = [
+      {"path": "/dev/mmcblk0", "pkname": None, "type": "disk", "rm": "1", "tran": None},
+      {"path": "/dev/mmcblk0p1", "pkname": "mmcblk0", "type": "part", "mountpoint": "/data"},
+    ]
+    disks = es._normalize_devices(flat)
+    assert not es._is_safe_disk(disks[0]), "a disk holding /data must never be a format target"
+
+  def test_nested_shape_still_works(self):
+    nested = [{"path": "/dev/sdg", "type": "disk", "rm": False, "tran": "usb", "children": [
+      {"path": "/dev/sdg1", "type": "part", "fstype": "ext4", "label": "openpilot"}]}]
+    disks = es._normalize_devices(nested)
+    assert [c["path"] for c in disks[0]["children"]] == ["/dev/sdg1"]
+
+  def test_nested_children_not_duplicated(self):
+    nested = [{"path": "/dev/sdg", "type": "disk", "rm": False, "tran": "usb", "children": [
+      {"path": "/dev/sdg1", "pkname": "sdg", "type": "part", "fstype": "ext4", "label": "openpilot"}]}]
+    disks = es._normalize_devices(nested)
+    assert len(disks[0]["children"]) == 1
+
+  def test_nvme_style_prefix_matching(self):
+    flat = [
+      {"path": "/dev/nvme0n1", "pkname": None, "type": "disk", "rm": True, "tran": "usb"},
+      {"path": "/dev/nvme0n1p1", "pkname": None, "type": "part", "fstype": "ext4", "label": "openpilot"},
+    ]
+    disks = es._normalize_devices(flat)
+    assert [c["path"] for c in disks[0]["children"]] == ["/dev/nvme0n1p1"]
+
+
+def comma_3x_topology():
+  """The real block layout off a comma 3X: internal UFS LUNs sda-sdf (sde alone has 48 partitions),
+  zram, and a 1TB NVMe-in-USB-enclosure at sdg. Flat, as this lsblk emits it."""
+  nodes = []
+  for disk, nparts in (("sda", 12), ("sdb", 2), ("sdc", 2), ("sdd", 3), ("sde", 48), ("sdf", 5)):
+    # internal: no transport, not removable
+    nodes.append({"path": f"/dev/{disk}", "pkname": None, "type": "disk", "rm": False,
+                  "tran": None, "size": 64 * 1024 ** 3})
+    for i in range(1, nparts + 1):
+      nodes.append({"path": f"/dev/{disk}{i}", "pkname": disk, "type": "part", "rm": False,
+                    "tran": None, "fstype": "ext4" if i % 3 == 0 else None, "label": None})
+  nodes.append({"path": "/dev/sdg", "pkname": None, "type": "disk", "rm": False, "tran": "usb",
+                "size": 1024 ** 4})
+  nodes.append({"path": "/dev/sdg1", "pkname": "sdg", "type": "part", "rm": False, "tran": None,
+                "fstype": "ext4", "label": "openpilot", "mountpoint": "/mnt/external_realdata"})
+  nodes.append({"path": "/dev/zram0", "pkname": None, "type": "disk", "rm": False, "tran": None,
+                "size": 2 * 1024 ** 3})
+  return nodes
+
+
+class TestRealCommaTopology:
+  def test_only_the_usb_drive_is_a_candidate(self):
+    disks = es._normalize_devices(comma_3x_topology())
+    safe = [d["path"] for d in disks if es._is_safe_disk(d)]
+    assert safe == ["/dev/sdg"], "internal UFS LUNs must never be format candidates"
+
+  def test_picks_the_usb_drive(self):
+    assert es._pick_disk(es._normalize_devices(comma_3x_topology()))["path"] == "/dev/sdg"
+
+  def test_formatted_drive_reports_mounted(self, monkeypatch):
+    r = probe_with(monkeypatch, comma_3x_topology(), ismount=True)
+    assert r.state == es.StorageState.MOUNTED
+    assert r.disk == "/dev/sdg"
+    assert r.partition == "/dev/sdg1"
+
+  def test_partitions_attach_to_the_right_disks(self):
+    disks = {d["path"]: d for d in es._normalize_devices(comma_3x_topology())}
+    assert len(disks["/dev/sde"]["children"]) == 48
+    assert len(disks["/dev/sdg"]["children"]) == 1
+    # sdg1 must not be swept up by a shorter prefix match
+    assert disks["/dev/sdg"]["children"][0]["path"] == "/dev/sdg1"
+
+
+class TestDiskSelection:
+  """A comma exposes many block devices. Selection must be deterministic and must not let an
+  unrelated disk shadow the real drive -- the chosen disk is what FORMAT runs wipefs against."""
+
+  # USB-to-NVMe enclosure: rm is false because the NVMe inside is not removable media
+  NVME_ENCLOSURE = {"path": "/dev/sdg", "type": "disk", "rm": False, "tran": "usb",
+                    "size": 1024 ** 4, "children": [
+                      {"path": "/dev/sdg1", "type": "part", "fstype": "ext4", "label": "openpilot",
+                       "mountpoint": "/mnt/external_realdata"}]}
+  EMMC_BOOT0 = {"path": "/dev/mmcblk0boot0", "type": "disk", "rm": "0", "tran": None, "size": 4 * 1024 ** 2}
+  EMMC_BOOT1 = {"path": "/dev/mmcblk0boot1", "type": "disk", "rm": "0", "tran": None, "size": 4 * 1024 ** 2}
+  EMMC_RPMB = {"path": "/dev/mmcblk0rpmb", "type": "disk", "rm": "0", "tran": None, "size": 4 * 1024 ** 2}
+  LOOP0 = {"path": "/dev/loop0", "type": "disk", "rm": "0", "tran": None, "size": 1024 ** 2}
+
+  def test_usb_nvme_enclosure_is_detected_despite_rm_false(self):
+    assert es._is_safe_disk(self.NVME_ENCLOSURE)
+
+  def test_emmc_boot_and_rpmb_never_targeted(self):
+    for node in (self.EMMC_BOOT0, self.EMMC_BOOT1, self.EMMC_RPMB):
+      assert not es._is_safe_disk(node), f"{node['path']} must never be a format target"
+
+  def test_loop_devices_never_targeted(self):
+    assert not es._is_safe_disk(self.LOOP0)
+
+  def test_real_drive_wins_over_clutter(self):
+    # emmc/loop nodes enumerate before sdg; the real drive must still be chosen
+    devices = [self.EMMC_BOOT0, self.EMMC_BOOT1, self.EMMC_RPMB, self.LOOP0, self.NVME_ENCLOSURE]
+    assert es._pick_disk(devices)["path"] == "/dev/sdg"
+
+  def test_labelled_disk_preferred_over_blank_usb_disk(self):
+    blank = {"path": "/dev/sda", "type": "disk", "rm": True, "tran": "usb", "size": 8 * 1024 ** 3}
+    assert es._pick_disk([blank, self.NVME_ENCLOSURE])["path"] == "/dev/sdg"
+
+  def test_usb_preferred_over_removable_non_usb(self):
+    other = {"path": "/dev/sdb", "type": "disk", "rm": True, "tran": "sata", "size": 2 * 1024 ** 4}
+    usb = {"path": "/dev/sdg", "type": "disk", "rm": False, "tran": "usb", "size": 8 * 1024 ** 3}
+    assert es._pick_disk([other, usb])["path"] == "/dev/sdg"
+
+  def test_selection_is_stable_across_ordering(self):
+    devices = [self.EMMC_BOOT0, self.NVME_ENCLOSURE, self.LOOP0]
+    assert es._pick_disk(devices)["path"] == es._pick_disk(list(reversed(devices)))["path"]
+
+  def test_no_candidates_returns_none(self):
+    assert es._pick_disk([self.EMMC_BOOT0, self.LOOP0]) is None
+
+  def test_end_to_end_mounted_nvme_enclosure(self, monkeypatch):
+    # the reported hardware: 1TB NVMe in a USB enclosure, formatted and mounted
+    devices = [self.EMMC_BOOT0, self.EMMC_RPMB, self.LOOP0, self.NVME_ENCLOSURE]
+    r = probe_with(monkeypatch, devices, ismount=True)
+    assert r.state == es.StorageState.MOUNTED
+    assert r.disk == "/dev/sdg"
+    assert r.partition == "/dev/sdg1"
+
+
 class TestBlkidFallback:
   """AGNOS often leaves lsblk's LABEL/FSTYPE blank for hot-plugged USB, which made a successfully
   formatted drive keep reporting 'needs format'. blkid probes the superblock directly."""
