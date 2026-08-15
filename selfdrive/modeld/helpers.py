@@ -1,10 +1,10 @@
 import json
 from pathlib import Path
 
+from openpilot.system.hardware.usb import CHESTNUT_FW_VERSION, CHESTNUT_USB_IDS, USB_DEVICES_PATH
+
 MODELS_DIR = Path(__file__).resolve().parent / 'models'
 TG_INPUT_DEVICES_PATH = MODELS_DIR / 'tg_input_devices.json'
-USBGPU_VID = 0xADD1
-USBGPU_PID = 0x0001
 
 
 def get_tg_input_devices(process_name: str, usbgpu: bool):
@@ -16,10 +16,12 @@ def modeld_pkl_path(usbgpu: bool):
   return MODELS_DIR / f'{prefix}driving_tinygrad.pkl'
 
 def usbgpu_present() -> bool:
-  for d in Path("/sys/bus/usb/devices").glob("*"):
+  # Only a chestnut running our own firmware is usable; hardwared flashes any that mismatch.
+  for d in USB_DEVICES_PATH.glob("*"):
     try:
-      if int((d / "idVendor").read_text(), 16) == USBGPU_VID and \
-          int((d / "idProduct").read_text(), 16) == USBGPU_PID:
+      usb_id = (int((d / "idVendor").read_text(), 16), int((d / "idProduct").read_text(), 16))
+      product = (d / "product").read_text().strip()
+      if usb_id in CHESTNUT_USB_IDS and product == f"custom {CHESTNUT_FW_VERSION}-CLEAN":
         return True
     except Exception:
       pass

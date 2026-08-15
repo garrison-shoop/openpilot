@@ -2,12 +2,16 @@
 import os
 os.environ['GMMU'] = '0' # for usbgpu fast loading, noop for qcom
 from tinygrad.tensor import Tensor
+from tinygrad.device import Device
+import struct
 import time
 import pickle
+from functools import cached_property
 import numpy as np
 import cereal.messaging as messaging
 from cereal import car, log
 from cereal.messaging import PubMaster, SubMaster
+from cereal.services import SERVICE_LIST
 from msgq.visionipc import VisionIpcClient, VisionStreamType, VisionBuf
 from opendbc.car.car_helpers import get_demo_car_params
 from openpilot.common.swaglog import cloudlog
@@ -63,6 +67,61 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
   return log.ModelDataV2.Action(desiredCurvature=float(desired_curvature),
                                 desiredAcceleration=float(desired_accel),
                                 shouldStop=bool(should_stop))
+
+
+class ChestnutState:
+  # only modeld can access chestnut
+  def __init__(self, pm: PubMaster, big: bool):
+    self.pm = pm
+    self.big = big
+    self.valid = True
+    self.sends = 0
+    self.metrics: dict[str, float] = {}
+
+  @cached_property
+  def power_limit(self) -> int:
+    smu = Device["AMD"].iface.dev_impl.smu
+    return smu._send_msg(smu.smu_mod.PPSMC_MSG_GetPptLimit, 0, read_back_arg=True, timeout=100)
+
+  def send(self) -> None:
+    msg = messaging.new_message('chestnutState')
+    state = msg.chestnutState
+    self.sends += 1
+    if self.big and "AMD" in Device._opened_devices and self.sends % 100 == 1:
+      try:
+        smu = Device["AMD"].iface.dev_impl.smu
+        smu._send_msg(smu.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, smu.smu_mod.TABLE_SMU_METRICS, timeout=100)
+        metrics = smu.read_table(smu.smu_mod.SmuMetricsExternal_t, smu.smu_mod.TABLE_SMU_METRICS).SmuMetrics
+        self.metrics = {'tempC': metrics.AvgTemperature[smu.smu_mod.TEMP_HOTSPOT],
+                        'memoryTempC': metrics.AvgTemperature[smu.smu_mod.TEMP_MEM],
+                        'powerDrawW': metrics.AverageSocketPower,
+                        'powerLimitW': self.power_limit,
+                        'gpuUsagePercent': metrics.AverageGfxActivity,
+                        'gpuClockMhz': metrics.AverageGfxclkFrequencyPostDs,
+                        'fanSpeedRpm': metrics.AvgFanRpm}
+        self.valid = True
+      except Exception:
+        if self.valid:
+          cloudlog.exception("chestnut state read failed")
+        self.valid = False
+        self.metrics.clear()
+    if self.big:
+      for k, v in self.metrics.items():
+        setattr(state, k, v)
+
+    asm_valid = False
+    if "AMD" in Device._opened_devices:
+      try:
+        # ASM runs on USB-C power, these still read without a gpu
+        asm = Device["AMD"].iface.pci_dev.usb
+        state.pcieLtssm = asm.read(0xB450, 1)[0]
+        state.supplyVoltage, state.supplyCurrent = struct.unpack('<Hh', bytes(asm.usb.control_read(0xC0, 5))[:4])
+        asm_valid = True
+      except Exception:
+        pass
+
+    msg.valid = asm_valid and (not self.big or self.valid)
+    self.pm.send('chestnutState', msg)
 
 
 class FrameMeta:
@@ -192,7 +251,8 @@ def main(demo=False):
   cloudlog.warning(f"models loaded in {time.monotonic() - st:.1f}s, modeld starting")
 
   # messaging
-  pm = PubMaster(["modelV2", "drivingModelData", "cameraOdometry", "modelDataV2SP"])
+  pm = PubMaster(["modelV2", "drivingModelData", "cameraOdometry", "modelDataV2SP"] + (["chestnutState"] if USBGPU else []))
+  chestnut_state = ChestnutState(pm, USBGPU) if USBGPU else None
   sm = SubMaster(["deviceState", "carState", "roadCameraState", "liveCalibration", "driverMonitoringState", "carControl", "liveDelay"])
 
   publish_state = PublishState()
@@ -338,6 +398,9 @@ def main(demo=False):
       pm.send('cameraOdometry', posenet_send)
       pm.send('modelDataV2SP', mdv2sp_send)
     last_vipc_frame_id = meta_main.frame_id
+
+    if chestnut_state is not None and run_count % round(ModelConstants.MODEL_RUN_FREQ / SERVICE_LIST['chestnutState'].frequency) == 0:
+      chestnut_state.send()
 
 
 if __name__ == "__main__":

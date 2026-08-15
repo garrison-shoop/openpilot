@@ -3,6 +3,7 @@ import pyray as rl
 from collections.abc import Callable
 from enum import IntEnum
 from openpilot.common.params import Params
+from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.widgets.offroad_alerts import UpdateAlert, OffroadAlert
 from openpilot.selfdrive.ui.widgets.exp_mode_button import ExperimentalModeButton
 from openpilot.selfdrive.ui.widgets.prime import PrimeWidget
@@ -19,6 +20,8 @@ CONTENT_MARGIN = 40
 SPACING = 25
 RIGHT_COLUMN_WIDTH = 750
 REFRESH_INTERVAL = 10.0
+EGPU_ICON_WIDTH = 50
+EGPU_ICON_HEIGHT = 37
 
 
 class HomeLayoutState(IntEnum):
@@ -175,6 +178,17 @@ class HomeLayout(Widget):
     # Version text (right aligned)
     if self.update_available or self.alert_count > 0:
       version_text_width -= SPACING * 1.5
+
+    # eGPU (chestnut) indicator, immediately left of the version text. Solid once the big model is
+    # compiled and actually in use, grayed while the device is attached but not yet built against.
+    if ui_state.usbgpu:
+      # assets live under icons_mici/ but are device-agnostic; shared rather than duplicated here
+      icon = gui_app.texture(f"icons_mici/egpu{'' if ui_state.usbgpu_compiled else '_gray'}.png",
+                             EGPU_ICON_WIDTH, EGPU_ICON_HEIGHT)
+      version_text_width -= EGPU_ICON_WIDTH + SPACING
+      icon_pos = rl.Vector2(self.header_rect.x + self.header_rect.width - version_text_width,
+                            self.header_rect.y + (self.header_rect.height - EGPU_ICON_HEIGHT) / 2)
+      rl.draw_texture_ex(icon, icon_pos, 0.0, 1.0, rl.WHITE)
 
     version_rect = rl.Rectangle(self.header_rect.x + self.header_rect.width - version_text_width, self.header_rect.y,
                                 version_text_width, self.header_rect.height)

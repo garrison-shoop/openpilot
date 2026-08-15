@@ -162,6 +162,10 @@ class UIState(UIStateSP):
     # Update started state
     self.started = self.sm["deviceState"].started and self.ignition
 
+    # chestnut presence is published live by hardwared, so this tracks hotplug offroad too. Stay
+    # latched while onroad: modeld holds the device open, which can hide it from the USB scan.
+    self.usbgpu = self.sm["deviceState"].chestnutPresent or (self.usbgpu and self.started)
+
     # Update body state
     if self.CP is not None and self.is_body != self.CP.notCar:
       self.is_body = self.CP.notCar
@@ -213,7 +217,7 @@ class UIState(UIStateSP):
     self.is_metric = self.params.get_bool("IsMetric")
     self.always_on_dm = self.params.get_bool("AlwaysOnDM")
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
-    self.usbgpu = self.params.get_bool("UsbGpuPresent")
+    # usbgpu presence comes from deviceState in update(); only the compiled flag is a param
     self.usbgpu_compiled = self.params.get_bool("UsbGpuCompiled")
 
     UIStateSP.update_params(self)
