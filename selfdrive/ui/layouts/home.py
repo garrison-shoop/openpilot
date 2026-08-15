@@ -185,8 +185,9 @@ class HomeLayout(Widget):
       # assets live under icons_mici/ but are device-agnostic; shared rather than duplicated here
       icon = gui_app.texture(f"icons_mici/egpu{'' if ui_state.usbgpu_compiled else '_gray'}.png",
                              EGPU_ICON_WIDTH, EGPU_ICON_HEIGHT)
+      # shrink the version area first, then sit in the gap that frees up to its left
       version_text_width -= EGPU_ICON_WIDTH + SPACING
-      icon_pos = rl.Vector2(self.header_rect.x + self.header_rect.width - version_text_width,
+      icon_pos = rl.Vector2(self.header_rect.x + self.header_rect.width - version_text_width - EGPU_ICON_WIDTH - SPACING,
                             self.header_rect.y + (self.header_rect.height - EGPU_ICON_HEIGHT) / 2)
       rl.draw_texture_ex(icon, icon_pos, 0.0, 1.0, rl.WHITE)
 
