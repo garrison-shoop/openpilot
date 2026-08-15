@@ -128,6 +128,9 @@ class SidebarBP(Widget):
     # Fan widget - rotates continuously based on fan speed
     self._fan_widget = FanWidget()
 
+    # Set once the card rects exist, since it anchors to the GPU card
+    self._egpu_rect: rl.Rectangle | None = None
+
     # State tracking - frame counters for throttled updates
     self._metrics_counter = 0
     self._params_counter = 0
@@ -471,6 +474,15 @@ class SidebarBP(Widget):
     # Fan at top
     self._button_rects['fan'] = rl.Rectangle(self._btn_x, rect.y + 10, BPConstants.FAN_SIZE, BPConstants.FAN_SIZE)
 
+    # eGPU (chestnut) indicator: below the fan, vertically centred on the GPU card it reports for
+    gpu_card = self._card_rects[1]
+    self._egpu_rect = rl.Rectangle(
+      self._btn_x + (BPConstants.BUTTON_SIZE - BPConstants.EGPU_WIDTH) / 2,
+      gpu_card.y + (gpu_card.height - BPConstants.EGPU_HEIGHT) / 2,
+      BPConstants.EGPU_WIDTH,
+      BPConstants.EGPU_HEIGHT,
+    )
+
   def _render(self, rect: rl.Rectangle) -> None:
     # Update layout rects if needed
     if self._rect.width != rect.width or self._rect.height != rect.height:
@@ -498,6 +510,13 @@ class SidebarBP(Widget):
     # Draw fan widget
     if 'fan' in self._button_rects:
       self._fan_widget.render(self._button_rects['fan'])
+
+    # eGPU (chestnut) indicator -- only shown when a chestnut is actually attached. Solid once the
+    # big model is compiled and in use, grayed while it is attached but not yet built against.
+    if ui_state.usbgpu and self._egpu_rect is not None:
+      icon = gui_app.texture(f"icons_mici/egpu{'' if ui_state.usbgpu_compiled else '_gray'}.png",
+                             BPConstants.EGPU_WIDTH, BPConstants.EGPU_HEIGHT)
+      rl.draw_texture_ex(icon, rl.Vector2(self._egpu_rect.x, self._egpu_rect.y), 0.0, 1.0, rl.WHITE)
 
     # Draw buttons dynamically stacked from bottom up (no gaps)
     btn_size = BPConstants.BUTTON_SIZE
