@@ -47,13 +47,13 @@ class _FakeLiveDelay:
 
 class _FakeSubMaster:
   def __init__(self, *args, **kwargs):
-    self.updated = {s: False for s in ('modelV2', 'liveParameters', 'selfdriveState', 'radarState', 'liveDelay')}
+    self.updated = {s: False for s in ('modelV2', 'vehicleParameters', 'selfdriveState', 'radarState', 'lateralDelay')}
 
   def update(self, timeout=0):
     pass
 
   def __getitem__(self, key):
-    if key == 'liveDelay':
+    if key == 'lateralDelay':
       return _FakeLiveDelay()
     raise KeyError(key)
 

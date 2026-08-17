@@ -98,7 +98,7 @@ class CarController(CarControllerBase, LateralCurvExt, LateralAngleExt, Longitud
   def update(self, CC, CC_SP, CS, now_nanos):
     can_sends = []
 
-    # BluePilot: update SubMaster (modelV2, liveParameters, selfdriveState, radarState) and vehicle model
+    # BluePilot: update SubMaster (modelV2, vehicleParameters, selfdriveState, radarState) and vehicle model
     LateralCurvExt.update_sm(self)
 
     # BluePilot: read runtime params from UI

@@ -112,8 +112,8 @@ class LateralCurvExt:
 
   def __init__(self, CP, CP_SP):
     # SubMaster for model data, live parameters, and selfdrive state
-    # liveDelay is consumed by LateralAngleExt (variable lookup time); harmless for curvature mode.
-    self.sm = messaging.SubMaster(['modelV2', 'liveParameters', 'selfdriveState', 'radarState', 'liveDelay'])
+    # lateralDelay is consumed by LateralAngleExt (variable lookup time); harmless for curvature mode.
+    self.sm = messaging.SubMaster(['modelV2', 'vehicleParameters', 'selfdriveState', 'radarState', 'lateralDelay'])
     self.VM = VehicleModel(CP)
     self.model = None
     self.lp = None
@@ -257,7 +257,7 @@ class LateralCurvExt:
     PSCM) is an equivalent measurement, independently validated against the comma IMU
     (corr +0.99), and the panda safety angle_meas switches to the same source (see
     safety/modes/ford.h) -- the layers always agree. angleOffsetDeg/roll come from
-    liveParameters (paramsd, IMU-derived, not the car yaw sensor).
+    vehicleParameters (paramsd, IMU-derived, not the car yaw sensor).
     """
     if self.bp_pinion_curvature_enabled:
       angle_offset_deg = self.lp.angleOffsetDeg if self.lp is not None else 0.0
@@ -272,8 +272,8 @@ class LateralCurvExt:
 
     if self.sm.updated['modelV2']:
       self.model = self.sm['modelV2']
-    if self.sm.updated['liveParameters']:
-      self.lp = self.sm['liveParameters']
+    if self.sm.updated['vehicleParameters']:
+      self.lp = self.sm['vehicleParameters']
     if self.sm.updated['selfdriveState']:
       self.ss = self.sm['selfdriveState']
 
