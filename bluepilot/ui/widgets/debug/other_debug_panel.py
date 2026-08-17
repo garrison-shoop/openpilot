@@ -335,11 +335,11 @@ class OtherDebugPanel(Widget):
           ("Distance", f"{lead.dRel:.1f} m"),
           ("Y Position", f"{lead.yRel:.2f} m"),
           ("Rel. Speed", f"{lead.vRel:.2f} m/s"),
-          ("Rel. Accel", f"{lead.aRel:.2f} m/s\u00b2"),
+          ("Rel. Accel", f"{lead.deprecated.aRel:.2f} m/s\u00b2"),
           ("Lead Speed", f"{lead.vLead:.1f} m/s"),
-          ("Path Dist", f"{lead.dPath:.2f} m"),
-          ("Status", _fmt_bool(lead.status, "Tracking", "No Lead")),
-          ("FCW", _fmt_bool(lead.fcw)),
+          ("Path Dist", f"{lead.deprecated.dPath:.2f} m"),
+          ("Status", _fmt_bool(lead.present, "Tracking", "No Lead")),
+          ("FCW", _fmt_bool(lead.deprecated.fcw)),
           ("Radar", _fmt_bool(lead.radar, "Yes", "Vision")),
         ]
 

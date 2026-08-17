@@ -231,8 +231,8 @@ class ChevronMetricsBP(ChevronMetrics):
     lead_one = radar_state.leadOne
     lead_two = radar_state.leadTwo
 
-    has_lead_one = lead_one.status if lead_one else False
-    has_lead_two = lead_two.status if lead_two else False
+    has_lead_one = lead_one.present if lead_one else False
+    has_lead_two = lead_two.present if lead_two else False
 
     self.update_alpha(has_lead_one or has_lead_two)
 
