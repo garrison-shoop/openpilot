@@ -39,6 +39,10 @@ class BPConstants:
   # Fan icon (from Qt FAN_SIZE = 90)
   FAN_SIZE = 90
 
+  # eGPU (chestnut) indicator, sits below the fan alongside the GPU card. Source art is 50x37.
+  EGPU_WIDTH = 80
+  EGPU_HEIGHT = 59
+
   # Font sizes
   FONT_SIZE_SMALL = 24
   FONT_SIZE_MEDIUM = 28
