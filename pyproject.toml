@@ -51,7 +51,14 @@ dependencies = [
 
   # ui
   "comma-deps-raylib",
-  "qrcode",   # BluePilot: web-server QR dialog
+
+  # BluePilot: optional deps bp-dev shipped that upstream doesn't. Every import site guards these
+  # with try/except ImportError, so a missing one degrades a feature rather than breaking a
+  # process -- which is exactly why their absence from uv.lock went unnoticed after the sync.
+  "qrcode",   # web-server QR dialog
+  "psutil",   # bp_portal process stats
+  "xattr",    # realdata preserve markers
+  # End BluePilot
 ]
 
 [project.optional-dependencies]
