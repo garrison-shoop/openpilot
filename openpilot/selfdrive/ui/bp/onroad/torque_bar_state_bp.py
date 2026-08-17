@@ -21,7 +21,7 @@ class TorqueBarStateBP:
     if ui_state.sm['controlsState'].lateralControlState.which() == 'angleState':
       controls_state = ui_state.sm['controlsState']
       car_state = ui_state.sm['carState']
-      live_parameters = ui_state.sm['liveParameters']
+      live_parameters = ui_state.sm['vehicleParameters']
       car_control = ui_state.sm['carControl']
 
       actual_lateral_accel = controls_state.curvature * car_state.vEgo ** 2

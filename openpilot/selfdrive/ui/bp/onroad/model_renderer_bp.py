@@ -122,9 +122,9 @@ class ModelRendererBP(RadRacerRoadMixin, ModelRenderer):
     if ui_state.rainbow_path or self._rainbow_lane_lines:
       self._rainbow_v = np.clip(sm['carState'].vEgo, 2.5, 35) / 30
 
-    if (sm.recv_frame["liveCalibration"] < ui_state.started_frame or
+    if (sm.recv_frame["extrinsicsCalibration"] < ui_state.started_frame or
         sm.recv_frame["modelV2"] < ui_state.started_frame):
-      bp_ui_log.visibility("ModelRenderer", False, reason=f"stale calib={sm.recv_frame['liveCalibration']} model={sm.recv_frame['modelV2']} started={ui_state.started_frame}")
+      bp_ui_log.visibility("ModelRenderer", False, reason=f"stale calib={sm.recv_frame['extrinsicsCalibration']} model={sm.recv_frame['modelV2']} started={ui_state.started_frame}")
       return
 
     bp_ui_log.state("ModelRenderer", "render_active", True)
@@ -135,7 +135,7 @@ class ModelRendererBP(RadRacerRoadMixin, ModelRenderer):
 
     self._experimental_mode = sm['selfdriveState'].experimentalMode
 
-    live_calib = sm['liveCalibration']
+    live_calib = sm['extrinsicsCalibration']
     from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
     self._path_offset_z = live_calib.height[0] if live_calib.height else HEIGHT_INIT[0]
 
