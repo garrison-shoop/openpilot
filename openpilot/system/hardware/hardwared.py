@@ -44,11 +44,48 @@ class Chestnut:
   MAX_ATTEMPTS = 3
   RETRY_INTERVAL = 20.
 
+  # BluePilot: how often to re-probe the PCIe link while modeld isn't using the GPU
+  LINK_PROBE_INTERVAL = 5.
+  # End BluePilot
+
   def __init__(self):
     self.thread: threading.Thread | None = None
     self.attempts = 0
     self.last_attempt = 0.
     self.flashed = False
+    # BluePilot: PCIe link state, i.e. whether a GPU is actually in the dock. Distinct from
+    # chestnutPresent, which only means the ASM bridge enumerated over USB.
+    self.link_up = False
+    self._link_thread: threading.Thread | None = None
+    self._last_link_probe = 0.
+    # End BluePilot
+
+  # BluePilot: offroad PCIe link probing -- see update_link
+  def _probe_link(self) -> None:
+    ret = subprocess.run(["sudo", sys.executable, os.path.join(BASEDIR, "openpilot/system/hardware/chestnut/flash.py"), "--link-up"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    self.link_up = ret.returncode == 0
+
+  def update_link(self, present: bool, modeld_owns_gpu: bool) -> None:
+    """Probe the PCIe link, but only while modeld is not driving the GPU.
+
+    Only one process may talk to the chestnut at a time, so this is skipped whenever modeld has
+    the model loaded or is loading it -- in that case modeld publishes the LTSSM in chestnutState
+    instead. Runs off-thread because it shells out to root.
+    """
+    if not present or modeld_owns_gpu:
+      if not present:
+        self.link_up = False
+      return
+    if self._link_thread is not None and self._link_thread.is_alive():
+      return
+    if time.monotonic() - self._last_link_probe < self.LINK_PROBE_INTERVAL:
+      return
+
+    self._last_link_probe = time.monotonic()
+    self._link_thread = threading.Thread(target=self._probe_link, daemon=True)
+    self._link_thread.start()
+  # End BluePilot
 
   def flash(self) -> None:
     ret = subprocess.run(["sudo", sys.executable, os.path.join(BASEDIR, "openpilot/system/hardware/chestnut/flash.py"), CHESTNUT_FW_VERSION],
@@ -306,6 +343,12 @@ def hardware_thread(end_event, hw_queue) -> None:
     chestnut_needs_switch = msg.deviceState.chestnutPresent and not big_model_available and chestnut_target is not None
     set_offroad_alert_if_changed("Offroad_ChestnutBranch", chestnut_needs_switch,
                                  extra_text=chestnut_target if chestnut_needs_switch else None)
+    # BluePilot: publish whether a GPU is actually seated, not just whether the dock enumerated.
+    # modeld owns the device once it is loading or running the big model; defer to it then.
+    modeld_owns_gpu = params.get_bool("UsbGpuLoading") or bool(params.get("UsbGpuActive"))
+    chestnut.update_link(msg.deviceState.chestnutPresent, modeld_owns_gpu)
+    msg.deviceState.chestnutLinkUp = chestnut.link_up
+    # End BluePilot
 
     # this subset is only used for offroad
     temp_sources = [

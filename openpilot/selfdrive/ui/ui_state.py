@@ -18,6 +18,9 @@ from openpilot.common.bluepilot import is_bluepilot
 from openpilot.selfdrive.ui.sunnypilot.ui_state import UIStateSP, DeviceSP
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
+# BluePilot: PCIe link trained and up (see chestnut/flash.py link_up)
+LTSSM_L0 = 0x78
+# End BluePilot
 PARAM_UPDATE_TIME = 1 / 5.0
 
 
@@ -58,6 +61,7 @@ class UIState(UIStateSP):
         "extrinsicsCalibration",
         "radarState",
         "deviceState",
+        "chestnutState",  # BluePilot: eGPU telemetry for the sidebar GPU card
         "pandaStates",
         "carParams",
         "driverMonitoringState",
@@ -98,6 +102,7 @@ class UIState(UIStateSP):
     self.chestnut_active: bool | None = None
     self.chestnut_loading: bool = False
     self.chestnut_state = ChestnutState.DISCONNECTED
+    self.chestnut_link_up: bool = False  # BluePilot: a GPU is seated and its PCIe link is trained
     self.started: bool = False
     self.ignition: bool = False
     self.recording_audio: bool = False
@@ -176,6 +181,15 @@ class UIState(UIStateSP):
 
     # Update started state
     self.started = self.sm["deviceState"].started and self.ignition
+
+    # BluePilot: whether a GPU is actually seated and its PCIe link trained -- distinct from
+    # usbgpu, which only means the ASM bridge enumerated. hardwared probes this while modeld is
+    # idle; once modeld owns the device it reports the LTSSM in chestnutState instead.
+    link = self.sm["deviceState"].chestnutLinkUp
+    if self.sm.alive["chestnutState"] and self.sm.valid["chestnutState"]:
+      link = link or self.sm["chestnutState"].pcieLtssm == LTSSM_L0
+    self.chestnut_link_up = self.chestnut_present and link
+    # End BluePilot
 
     # Update body state
     if self.CP is not None and self.is_body != self.CP.notCar:
