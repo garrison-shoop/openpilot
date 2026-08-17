@@ -1,6 +1,6 @@
 import pyray as rl
 
-from msgq.visionipc import VisionStreamType
+from openpilot.cereal.visionipc import VisionStreamType
 from openpilot.common.params import Params
 from openpilot.selfdrive.ui.onroad.cameraview import CameraView as TiciCameraView
 from openpilot.selfdrive.ui.ui_state import ui_state
