@@ -562,9 +562,18 @@ def main():
   parser = argparse.ArgumentParser(description="check and flash the bundled chestnut firmware")
   parser.add_argument("version", nargs="?", help="expected firmware version hash")
   parser.add_argument("--force", action="store_true", help="reflash even when the version matches")
+  # BluePilot: expose link_up() on the CLI so hardwared can probe it offroad
+  parser.add_argument("--link-up", action="store_true",
+                      help="exit 0 if the PCIe link is up (a GPU is attached and trained), 1 otherwise")
+  # End BluePilot
   args = parser.parse_args()
   if os.geteuid() != 0:
     raise RuntimeError("flash.py must run as root")
+  # BluePilot: the ASM bridge enumerates on USB-C alone, so this is the only way to tell an empty
+  # dock from one with a GPU in it without loading the model. Needs root for the usbdevfs ioctls.
+  if args.link_up:
+    sys.exit(0 if link_up() else 1)
+  # End BluePilot
   flash_chestnut(expected_version=args.version, force=args.force)
 
 
