@@ -42,7 +42,7 @@ from opendbc.sunnypilot.car.ford.lateral_curv_ext import LateralResult
 from opendbc.sunnypilot.car.ford.human_turn import HumanTurnDetector
 from opendbc.sunnypilot.car.ford.lane_center_trim import LaneCenterTrim
 from opendbc.sunnypilot.car.ford.values_ext import BP_ANGLE_LIMITS
-from selfdrive.modeld.constants import ModelConstants
+from openpilot.selfdrive.modeld.constants import ModelConstants
 
 # Hard-coded per-platform gain defaults.
 # CAN vehicles (Escape MK4, Bronco Sport, Explorer, Maverick, Edge)

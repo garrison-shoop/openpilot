@@ -34,7 +34,7 @@ This document provides a comprehensive guide to understanding, navigating, and m
 
 ### Key Information
 - **Current Version:** 5.0.0
-- **Based On:** SunnyPilot 2025.003.0.0
+- **Based On:** sunnypilot master (August 16, 2026, openpilot 0.11.2 base, AGNOS 19.6)
 - **Repository:** https://github.com/BluePilotDev/bluepilot
 - **Current Branch:** `bp-6.0-ui-refactor` (active development)
 - **Main Dev Branch:** `bp-dev`

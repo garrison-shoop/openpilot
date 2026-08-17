@@ -17,7 +17,7 @@ from unittest.mock import MagicMock
 import pyray as rl
 
 # --- 1. Stub cereal SubMaster so ui_state.update() doesn't hang on services
-import cereal.messaging as messaging
+import openpilot.cereal.messaging as messaging
 _orig_SubMaster = messaging.SubMaster
 
 class _FakeMsg:
@@ -68,7 +68,7 @@ messaging.SubMaster = _FakeSubMaster
 messaging.PubMaster = MagicMock
 
 # --- 2. Now we can import the rest of the UI stack
-from cereal import log
+from openpilot.cereal import log
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.mici.layouts.main import MiciMainLayout

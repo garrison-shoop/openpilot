@@ -82,7 +82,7 @@ def find_ffmpeg_binary():
     fallback_paths = [
         '/usr/bin/ffmpeg',
         '/usr/local/bin/ffmpeg',
-        '/data/openpilot/third_party/ffmpeg',  # Comma device custom install
+        '/data/openpilot/openpilot/third_party/ffmpeg',  # Comma device custom install
         '/opt/homebrew/bin/ffmpeg',  # macOS
     ]
 

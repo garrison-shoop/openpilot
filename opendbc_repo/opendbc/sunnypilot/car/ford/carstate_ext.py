@@ -7,7 +7,7 @@ See the LICENSE.md file in the root directory for more details.
 
 from enum import StrEnum
 
-import cereal.messaging as messaging
+import openpilot.cereal.messaging as messaging
 from opendbc.car import Bus, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.can.parser import CANParser

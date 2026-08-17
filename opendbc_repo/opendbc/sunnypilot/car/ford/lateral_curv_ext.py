@@ -19,18 +19,18 @@ import math
 from collections import namedtuple, deque
 from enum import IntEnum
 
-import cereal.messaging as messaging
+import openpilot.cereal.messaging as messaging
 import numpy as np
 from numpy import clip, interp
 
-from common.pid import PIDController
+from openpilot.common.pid import PIDController
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, DT_CTRL
 from opendbc.car.lateral import ISO_LATERAL_ACCEL, apply_std_steer_angle_limits
 from opendbc.car.vehicle_model import VehicleModel
 from opendbc.car.ford.values import CarControllerParams, FordFlags
 from opendbc.sunnypilot.car.ford.values_ext import BP_ANGLE_LIMITS, CURVATURE_MAX, FordSafetyFlagsSP
 from opendbc.sunnypilot.car.ford.human_turn import HumanTurnDetector
-from selfdrive.modeld.constants import ModelConstants
+from openpilot.selfdrive.modeld.constants import ModelConstants
 
 
 class PrimaryLateralControl(IntEnum):

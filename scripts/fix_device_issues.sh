@@ -60,7 +60,7 @@ echo ""
 echo "[3/3] Verifying critical files..."
 FILES_TO_CHECK=(
     "/data/openpilot/CHANGELOG.md"
-    "/data/openpilot/sunnypilot/common/version.h"
+    "/data/openpilot/openpilot/sunnypilot/common/version.h"
 )
 
 ALL_OK=true

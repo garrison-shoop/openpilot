@@ -32,7 +32,7 @@ For example
 
 installer.comma.ai/BluePilotDev/bp-7.0
 
-will install the **bp-7.0** branch (current release, synced with sunnypilot master as of June 10, 2026).  Branches known to no longer work due to changes in the comma codebase will be appended with -deprecated so it will be obvious they will not install or work correctly.
+will install the **bp-7.0** branch (current release, synced with sunnypilot master as of August 16, 2026).  Branches known to no longer work due to changes in the comma codebase will be appended with -deprecated so it will be obvious they will not install or work correctly.
 
 </details>
 
@@ -54,7 +54,7 @@ Join the official #ford channel at the sunnypilot Discord server to stay up to d
 
 [bluepilot](https://github.com/bluepilotdev/bluepilot) is a fork of the hugely popular SunnyPilot project for the comma 3X and comma 4.  The goal of BluePilot is to develop, test, and stage Ford specific enhancements, validating them before submission to the SunnyPilot team for inclusion in the parent project.  BluePilot is always based upon sunnypilot's master branch.
 
-**BluePilot bp-7.0** is synced with **sunnypilot master (June 10, 2026, openpilot 0.11.2 base)** and includes all upstream sunnypilot features plus Ford-specific enhancements. This release runs on AGNOS 18.4 and supports both the comma 3X and the comma 4.
+**BluePilot bp-7.0** is synced with **sunnypilot master (August 16, 2026, openpilot 0.11.2 base)** and includes all upstream sunnypilot features plus Ford-specific enhancements. This release runs on AGNOS 19.6 and supports both the comma 3X and the comma 4.
 
 ### Upstream SunnyPilot Features
 BluePilot includes **all** features from the upstream SunnyPilot project. For complete sunnypilot documentation:
@@ -106,7 +106,7 @@ Requires further assistance with software installation? Join the [sunnypilot Dis
 
 ## What's New in bp-7.0
 
-BluePilot 7.0 is a **major update** synced with sunnypilot master (June 10, 2026, openpilot 0.11.2 base) on AGNOS 18.4, headlined by a second, selectable Ford lateral control scheme with full panda safety enforcement.
+BluePilot 7.0 is a **major update** synced with sunnypilot master (August 16, 2026, openpilot 0.11.2 base) on AGNOS 19.6, headlined by a second, selectable Ford lateral control scheme with full panda safety enforcement.
 
 ### Angle-Primary Lateral Control (New)
 A second Ford steering strategy, selectable at any time from the settings menu (no reinstall or reboot):

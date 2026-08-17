@@ -62,7 +62,7 @@ echo ""
 echo "[Critical Files]"
 FILES=(
   "/data/openpilot/CHANGELOG.md"
-  "/data/openpilot/sunnypilot/common/version.h"
+  "/data/openpilot/openpilot/sunnypilot/common/version.h"
   "/data/openpilot/BPVERSION"
 )
 
