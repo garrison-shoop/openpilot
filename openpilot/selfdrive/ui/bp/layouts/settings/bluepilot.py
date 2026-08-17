@@ -1,7 +1,6 @@
 import pyray as rl
 
-from openpilot.common.params import Params
-from openpilot.common.params_pyx import UnknownKeyName
+from openpilot.common.params import Params, UnknownKeyName
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog

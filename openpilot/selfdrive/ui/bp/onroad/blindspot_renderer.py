@@ -2,8 +2,7 @@ import time
 import math
 import pyray as rl
 from openpilot.common.filter_simple import FirstOrderFilter
-from openpilot.common.params import Params
-from openpilot.common.params_pyx import UnknownKeyName
+from openpilot.common.params import Params, UnknownKeyName
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.selfdrive.ui.bp.lib.ui_debug_logger import bp_ui_log

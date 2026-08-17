@@ -1,7 +1,6 @@
 from enum import IntEnum
 
-from openpilot.common.params import Params
-from openpilot.common.params_pyx import UnknownKeyName
+from openpilot.common.params import Params, UnknownKeyName
 
 
 def get_int_enum_param[IntEnumT: IntEnum](
@@ -14,7 +13,7 @@ def get_int_enum_param[IntEnumT: IntEnum](
   try:
     raw_value = params.get(key)
   except UnknownKeyName:
-    # BluePilot: Allow UI development before common/params_pyx.so has been rebuilt.
+    # BluePilot: Allow UI development before the key is present in common/params_keys.h.
     return default
 
   try:
