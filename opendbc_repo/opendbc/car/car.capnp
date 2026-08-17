@@ -203,6 +203,10 @@ struct CarState {
   vehicleSensorsInvalid @52 :Bool;  # invalid steering angle readings, etc.
   lowSpeedAlert @56 :Bool;  # lost steering control due to a dynamic min steering speed
   blockPcmEnable @60 :Bool;  # whether to allow PCM to enable this frame
+  # BluePilot: synced openpilot reads CS.carNotReady (selfdrive/car/car_events.py). Ordinal and
+  # wording match upstream opendbc 3b8f263e; no Ford interface sets it, so it stays false --
+  # i.e. current bp-dev behaviour. Remove when opendbc_repo is properly synced.
+  carNotReady @61 :Bool;  # car is transiently refusing engagement, used to prevent a fault if engaged
 
   # cruise state
   cruiseState @10 :CruiseState;
@@ -354,6 +358,9 @@ struct CarControl {
   orientationNED @13 :List(Float32);
   angularVelocity @14 :List(Float32);
   currentCurvature @17 :Float32;  # From vehicle model
+  # BluePilot: synced openpilot writes CC.driverMonitoringEscalation (controls/controlsd.py).
+  # Ordinal matches upstream opendbc 3b8f263e. Remove when opendbc_repo is properly synced.
+  driverMonitoringEscalation @18 :Bool; # trigger the car's stock driver monitoring escalation
 
   cruiseControl @4 :CruiseControl;
   hudControl @5 :HUDControl;
