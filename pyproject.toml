@@ -56,7 +56,6 @@ dependencies = [
   # with try/except ImportError, so a missing one degrades a feature rather than breaking a
   # process -- which is exactly why their absence from uv.lock went unnoticed after the sync.
   "qrcode",   # web-server QR dialog
-  "pyserial", # pigeond + qcomgpsd (stock code; upstream dropped it, bp-dev shipped it)
   "psutil",   # bp_portal process stats
   "xattr",    # realdata preserve markers
   # End BluePilot

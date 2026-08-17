@@ -7,9 +7,6 @@ import signal
 import itertools
 import math
 import time
-# BluePilot: diag-port reconnect handling
-from serial import Serial, SerialException
-# End BluePilot
 import datetime
 from typing import NoReturn
 from struct import unpack_from, calcsize, pack
@@ -20,7 +17,10 @@ from openpilot.common.gpio import gpio_init, gpio_set
 from openpilot.common.utils import retry
 from openpilot.common.time_helpers import system_time_valid
 from openpilot.common.hardware.comma.pins import GPIO
-from openpilot.common.serial import Serial
+# BluePilot: SerialException for the diag-port reconnect below. It must come from
+# common/serial.py -- that is what Serial actually raises; pyserial's same-named class
+# would never match, so the reconnect handler could not fire.
+from openpilot.common.serial import Serial, SerialException
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.qcomgpsd.modemdiag import ModemDiag, DIAG_LOG_F, setup_logs, send_recv
 from openpilot.system.qcomgpsd.structs import (dict_unpacker, position_report, relist,
