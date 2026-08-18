@@ -647,7 +647,10 @@ struct CarParams {
     torque @0;
     angle @1;
 
-    curvatureDEPRECATED @2;
+    # BluePilot: upstream un-deprecated this and synced controlsd compares against
+    # SteerControlType.curvature (selfdrive/controls/controlsd.py:154). Ordinal 2 matches
+    # upstream opendbc 3b8f263e. Ford sets `angle`, so behaviour is unchanged.
+    curvature @2;
   }
 
   enum TransmissionType {
