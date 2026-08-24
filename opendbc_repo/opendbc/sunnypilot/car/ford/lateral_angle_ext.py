@@ -164,7 +164,7 @@ class LateralAngleExt:
     self.lane_center_trim = LaneCenterTrim()
     self.enable_lane_positioning_ang = False
     self.custom_path_offset_ang = 0.0
-    self.lane_centering_strength_ang = 0.5
+    self.lane_centering_strength_ang = 0.25
     # Telemetry: variable curvature lookup time used this frame (s)
     self.bp_curvature_lookup_time = _VLT_T_EXTRA_MAX + 0.3725  # warm start at ~0.5s
     # BluePilot: error-clipped kappa path_angle was derived from -- carcontroller.py reads this as

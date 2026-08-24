@@ -2787,7 +2787,7 @@
           "key": "lane_centering_strength_ang",
           "widget": "option",
           "title": "[Lateral Tuning] Lane Centering Strength (Angle)",
-          "description": "How much authority the lane centering trim has vs. the model's own path (0.0-1.0). Default 0.5.",
+          "description": "How much authority the lane centering trim has vs. the model's own path (0.0-1.0). Default 0.25.",
           "min": 0.0,
           "max": 1.0,
           "step": 0.05,
