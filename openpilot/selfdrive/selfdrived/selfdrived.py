@@ -54,6 +54,11 @@ TurnDirection = custom.ModelDataV2SP.TurnDirection
 
 IGNORED_SAFETY_MODES = (SafetyModel.silent, SafetyModel.noOutput)
 
+# BluePilot: debounce for the generic commIssue catch-all, see the comment at its use site
+# (update_events) for why. 20 frames @ 100Hz = 200ms.
+COMM_ISSUE_DEBOUNCE_FRAMES = 20
+# End BluePilot
+
 
 class SelfdriveD(CruiseHelper):
   def __init__(self, CP=None, CP_SP=None):
@@ -135,6 +140,9 @@ class SelfdriveD(CruiseHelper):
     self.active = False
     self.mismatch_counter = 0
     self.cruise_mismatch_counter = 0
+    # BluePilot: debounce counter for the generic commIssue catch-all, see update_events
+    self.comm_issue_counter = 0
+    # End BluePilot
     self.last_steering_pressed_frame = 0
     self.distance_traveled = 0
     self.last_functional_fan_frame = 0
@@ -432,7 +440,16 @@ class SelfdriveD(CruiseHelper):
     no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
     warmup_sec = 5.
     big_model_settling = self.big_model_loading or time.monotonic() < self.big_model_ready_t + warmup_sec
-    if not self.sm.all_checks() and no_system_errors and not big_model_settling:  # the load holds modelV2 and friends back on purpose
+    # BluePilot: debounce this catch-all like the panda-safety mismatch check a few lines up
+    # already does for the same class of problem -- this check had no tolerance of its own. A
+    # brand-specific NO_ENTRY+SOFT_DISABLE event (e.g. radarTempUnavailable) stops suppressing
+    # this catch-all in the exact same frame the socket it was covering for recovers, racing
+    # selfdrived's SubMaster snapshot against the other process's publish. Reproduced on Ford
+    # Reverse->Drive. Combined here with upstream's big_model_settling guard.
+    raw_comm_issue = not self.sm.all_checks() and no_system_errors and not big_model_settling
+    self.comm_issue_counter = self.comm_issue_counter + 1 if raw_comm_issue else 0
+    if self.comm_issue_counter > COMM_ISSUE_DEBOUNCE_FRAMES:  # the load holds modelV2 and friends back on purpose
+      # End BluePilot
       if not self.sm.all_alive():
         self.events.add(EventName.commIssue)
       elif not self.sm.all_freq_ok():
