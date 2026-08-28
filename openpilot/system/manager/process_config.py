@@ -1,10 +1,13 @@
+import functools
 import os
 import operator
 import platform
 
+import openpilot.cereal.messaging as messaging
 from opendbc.car.structs import car
 from openpilot.cereal import custom
 from openpilot.common.params import Params
+from openpilot.common.swaglog import cloudlog
 # BluePilot: fork detection for BP process wiring
 from openpilot.common.bluepilot import is_bluepilot
 # End BluePilot
@@ -35,11 +38,50 @@ def logging(started: bool, params: Params, CP: car.CarParams) -> bool:
 def ublox_available() -> bool:
   return os.path.exists('/dev/ttyHS0') and not os.path.exists('/persist/comma/use-quectel-gps')
 
+# BluePilot: Ford CAN GPS (cangpsd) -- read GPS off the vehicle CAN bus instead of the
+# device receiver. Ported from cgrin/bluepilot@can-gps-time.
+@functools.cache
+def prev_route_brand() -> str:
+  """The car brand recorded on the previous drive, or "" if there isn't one.
+
+  manager evaluates process gates against the live `carParams` message, which card only
+  publishes once it has fingerprinted the car -- about six seconds into a boot. Any gate
+  that keys off the brand is therefore wrong for those six seconds, which is long enough
+  for ubloxd/pigeond to start, claim gpsLocationExternal, and be killed again.
+  CarParamsPersistent is written by card on every drive and survives reboots, so on any
+  boot after the first in a given car it supplies the brand immediately.
+
+  Cached for the life of the process: card is the only writer, and by the time it has run
+  the live CP is available and takes precedence below anyway.
+  """
+  cp_bytes = Params().get("CarParamsPersistent")
+  if cp_bytes is None:
+    return ""
+  try:
+    return messaging.log_from_bytes(cp_bytes, car.CarParams).brand
+  except Exception:
+    cloudlog.exception("process_config: failed to deserialize CarParamsPersistent")
+    return ""
+
+def ford_can_gps(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # Prefer the live CP; fall back to the last drive's brand only while card is still
+  # fingerprinting, so ubloxd never gets a head start on the topic cangpsd is about to own.
+  # Only meaningful on ublox devices: with a Quectel modem, UbloxAvailable is False and every
+  # consumer reads gpsLocation (qcomgpsd) instead, so publishing gpsLocationExternal would
+  # reach nobody. Gating here keeps the toggle from starting a daemon that does nothing.
+  brand = CP.brand or prev_route_brand()
+  return started and ublox_available() and brand == "ford" and params.get_bool("FordPrefUseVehicleGps")
+# End BluePilot
+
 def ublox(started: bool, params: Params, CP: car.CarParams) -> bool:
   use_ublox = ublox_available()
   if use_ublox != params.get_bool("UbloxAvailable"):
     params.put_bool("UbloxAvailable", use_ublox, block=True)
-  return started and use_ublox
+  # BluePilot: gate only the ubloxd/pigeond process start here; the UbloxAvailable param above
+  # stays driven by raw ublox_available() so gpsLocationExternal/gpsLocation routing
+  # (common/gps.py, locationd.cc) is unaffected by whether cangpsd is providing GPS instead.
+  return started and use_ublox and not ford_can_gps(started, params, CP)
+  # End BluePilot
 
 def joystick(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started and params.get_bool("JoystickDebugMode")
@@ -213,6 +255,7 @@ if is_bluepilot():
   procs += [
     PythonProcess("bp_portal", "bluepilot.backend.bp_portal", _bp_portal_enabled),
     PythonProcess("bp_route_preprocessor", "bluepilot.backend.routes.preprocessor", _bp_route_preprocessor_enabled),
+    PythonProcess("cangpsd", "bluepilot.system.cangpsd", ford_can_gps, enabled=COMMA_HARDWARE),
   ]
 # End BluePilot
 
