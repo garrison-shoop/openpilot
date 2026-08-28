@@ -33,6 +33,7 @@ from opendbc.car import Bus
 from opendbc.car.ford.fordcan import CanBus
 from opendbc.car.ford.values import DBC
 
+from openpilot.common.gps import get_gps_location_service
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
@@ -270,8 +271,14 @@ def decode_quality(vl: dict) -> dict:
 def build_gps_msg(lat: float, lon: float, altitude: float | None, speed: float | None,
                    bearing_deg: float | None, unix_timestamp_millis: int, hdop: float | None,
                    vdop: float | None, sat_count: int,
-                   has_fix: bool, inferred: bool = False) -> capnp.lib.capnp._DynamicStructBuilder:
-  """Build a gpsLocationExternal message from already-decoded plain values.
+                   has_fix: bool, inferred: bool = False,
+                   service: str = 'gpsLocationExternal') -> capnp.lib.capnp._DynamicStructBuilder:
+  """Build a GPS location message from already-decoded plain values.
+
+  BluePilot: `service` selects the topic. Consumers pick between gpsLocationExternal and
+  gpsLocation on UbloxAvailable (common/gps.py, sunnypilot locationd.cc), so on a Quectel
+  device -- every comma 3X -- the vehicle fix has to go out on gpsLocation or nothing reads
+  it. Defaults to gpsLocationExternal to match upstream ublox hardware.
 
   A None means the car never told us. GpsLocationData has no way to say "unknown" for a
   value, only an accuracy alongside it, so the value goes out as 0 and the matching
@@ -280,8 +287,8 @@ def build_gps_msg(lat: float, lon: float, altitude: float | None, speed: float |
   -- a consumer that reads accuracy can tell them apart, and one that ignores accuracy is
   no worse off than it would be with a fabricated number.
   """
-  msg = messaging.new_message('gpsLocationExternal', valid=True)
-  gps = msg.gpsLocationExternal
+  msg = messaging.new_message(service, valid=True)
+  gps = getattr(msg, service)
   gps.latitude = lat
   gps.longitude = lon
   gps.altitude = altitude if altitude is not None else 0.0
@@ -463,7 +470,7 @@ def make_parser(dbc_name: str, can_bus: int) -> CANParser:
   ], can_bus)
 
 
-def make_pub_master(attempts: int = 5, delay: float = 1.0) -> messaging.PubMaster:
+def make_pub_master(service: str = 'gpsLocationExternal', attempts: int = 5, delay: float = 1.0) -> messaging.PubMaster:
   """Open the gpsLocationExternal pub socket, retrying with backoff.
 
   If UbloxAvailable was just flipped off while onroad, manager's
@@ -474,10 +481,10 @@ def make_pub_master(attempts: int = 5, delay: float = 1.0) -> messaging.PubMaste
   last_exc: Exception | None = None
   for attempt in range(attempts):
     try:
-      return messaging.PubMaster(['gpsLocationExternal'])
+      return messaging.PubMaster([service])
     except Exception as e:
       last_exc = e
-      cloudlog.warning(f"cangpsd: failed to open gpsLocationExternal pub socket (attempt {attempt + 1}/{attempts}): {e}")
+      cloudlog.warning(f"cangpsd: failed to open {service} pub socket (attempt {attempt + 1}/{attempts}): {e}")
       time.sleep(delay)
   assert last_exc is not None
   raise last_exc
@@ -510,7 +517,11 @@ def main() -> NoReturn:
   cp = make_parser(dbc_name, can_bus)
 
   can_sock = messaging.sub_sock('can', timeout=20)
-  pm = make_pub_master()
+  # BluePilot: publish on whatever topic this device's consumers read. On ublox hardware that
+  # is gpsLocationExternal; on a Quectel device (every comma 3X) it is gpsLocation.
+  gps_service = get_gps_location_service(params)
+  cloudlog.info(f"cangpsd publishing on {gps_service}")
+  pm = make_pub_master(gps_service)
 
   now = time.monotonic()
   fix = FixTracker()
@@ -580,8 +591,8 @@ def main() -> NoReturn:
         inferred = fix.time_fresh(now) and decode_inferred(cp.vl[GPS_ADDR_TIME])
         msg = build_gps_msg(lat, lon, quality["altitude"], quality["speed"], quality["bearing_deg"],
                              publish_millis, quality["hdop"], quality["vdop"], quality["sat_count"], has_fix,
-                             inferred)
-        pm.send('gpsLocationExternal', msg)
+                             inferred, service=gps_service)
+        pm.send(gps_service, msg)
 
     rk.keep_time()
 

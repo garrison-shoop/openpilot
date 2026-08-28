@@ -65,12 +65,16 @@ def prev_route_brand() -> str:
 
 def ford_can_gps(started: bool, params: Params, CP: car.CarParams) -> bool:
   # Prefer the live CP; fall back to the last drive's brand only while card is still
-  # fingerprinting, so ubloxd never gets a head start on the topic cangpsd is about to own.
-  # Only meaningful on ublox devices: with a Quectel modem, UbloxAvailable is False and every
-  # consumer reads gpsLocation (qcomgpsd) instead, so publishing gpsLocationExternal would
-  # reach nobody. Gating here keeps the toggle from starting a daemon that does nothing.
+  # fingerprinting, so the device GPS daemon never gets a head start on the topic cangpsd is
+  # about to own.
+  #
+  # BluePilot: cgrin's original gated this on ublox_available() because cangpsd published
+  # gpsLocationExternal, which nothing reads on a Quectel device. cangpsd now resolves its
+  # topic via get_gps_location_service(), so it is useful on both -- gpsLocationExternal on
+  # ublox, gpsLocation on Quectel (every comma 3X). The ublox gate is therefore dropped, and
+  # whichever device GPS daemon owns the topic yields below.
   brand = CP.brand or prev_route_brand()
-  return started and ublox_available() and brand == "ford" and params.get_bool("FordPrefUseVehicleGps")
+  return started and brand == "ford" and params.get_bool("FordPrefUseVehicleGps")
 # End BluePilot
 
 def ublox(started: bool, params: Params, CP: car.CarParams) -> bool:
@@ -99,7 +103,9 @@ def not_long_maneuver(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started and not params.get_bool("LongitudinalManeuverMode")
 
 def qcomgps(started: bool, params: Params, CP: car.CarParams) -> bool:
-  return started and not ublox_available()
+  # BluePilot: yield gpsLocation to cangpsd when it is providing the fix, mirroring what the
+  # ublox gate does for ubloxd/pigeond. msgq allows only one publisher per topic.
+  return started and not ublox_available() and not ford_can_gps(started, params, CP)
 
 def always_run(started: bool, params: Params, CP: car.CarParams) -> bool:
   return True
