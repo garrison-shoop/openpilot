@@ -438,7 +438,7 @@ class SidebarBP(Widget):
     self._cpu_card.set_data(MetricData("CPU", "", self._cpu_usage, self._cpu_temp, cpu_color))
 
     # GPU card -- shows the eGPU instead of the integrated GPU whenever a chestnut is attached
-    if ui_state.usbgpu:
+    if ui_state.chestnut_present:
       self._gpu_card.set_data(MetricData("EGPU", "", self._egpu_usage, self._egpu_temp, self._egpu_color()))
     else:
       gpu_color = BPColors.GOOD
@@ -563,14 +563,14 @@ class SidebarBP(Widget):
     #   grey   - dock detected, no PCIe link (empty dock, or card not seated/powered)
     #   yellow - GPU attached and linked, but the big model is not compiled yet
     #   green  - linked and running the big model
-    if ui_state.usbgpu and self._egpu_rect is not None:
+    if ui_state.chestnut_present and self._egpu_rect is not None:
       if not ui_state.chestnut_link_up:
         tint = BPColors.DISABLED
-      elif not ui_state.usbgpu_compiled:
+      elif not ui_state.chestnut_compiled:
         tint = BPColors.WARNING
       else:
         tint = BPColors.GOOD
-      icon = gui_app.texture("icons_mici/egpu.png", BPConstants.EGPU_WIDTH, BPConstants.EGPU_HEIGHT)
+      icon = gui_app.texture("icons_mici/chestnut.png", BPConstants.EGPU_WIDTH, BPConstants.EGPU_HEIGHT)
       rl.draw_texture_ex(icon, rl.Vector2(self._egpu_rect.x, self._egpu_rect.y), 0.0, 1.0, tint)
 
     # Draw buttons dynamically stacked from bottom up (no gaps)
