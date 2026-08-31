@@ -10,6 +10,7 @@ import pytest
 
 from bluepilot.ui.lib.colors import BPColors
 from bluepilot.ui.widgets.sidebar import SidebarBP
+from openpilot.selfdrive.ui.ui_state import ChestnutState
 
 
 def make_sidebar(monkeypatch, *, alive=True, valid=True, usage=42.0, temp=78.5, raises=False):
@@ -92,3 +93,38 @@ class TestEgpuColour:
     s._egpu_reporting = True
     s._egpu_temp = "N/A"
     assert s._egpu_color() == BPColors.GOOD
+
+
+class TestChestnutIconTint:
+  """The icon maps upstream's ChestnutState, plus BluePilot's PCIe link refinement.
+
+  DISCONNECTED is not covered here: the render site hides the icon entirely rather than
+  asking for a tint, so there is no colour to assert.
+  """
+
+  @staticmethod
+  def _tint(monkeypatch, state, link_up):
+    import bluepilot.ui.widgets.sidebar as sb
+    monkeypatch.setattr(sb, "ui_state", SimpleNamespace(chestnut_state=state, chestnut_link_up=link_up))
+    return sb.SidebarBP._chestnut_tint()
+
+  @pytest.mark.parametrize(("state", "link_up", "expected"), [
+    # a failed big model outranks everything -- it is the actionable one
+    (ChestnutState.FAILED,     True,  BPColors.DANGER),
+    (ChestnutState.FAILED,     False, BPColors.DANGER),
+    # BluePilot-only: dock enumerated but no trained PCIe link => no GPU seated
+    (ChestnutState.READY,      False, BPColors.DISABLED),
+    (ChestnutState.ACTIVE,     False, BPColors.DISABLED),
+    (ChestnutState.UNCOMPILED, False, BPColors.DISABLED),
+    # linked, straight from upstream's state
+    (ChestnutState.UNCOMPILED, True,  BPColors.WARNING),
+    (ChestnutState.LOADING,    True,  BPColors.ACCENT),
+    (ChestnutState.READY,      True,  BPColors.GOOD),
+    (ChestnutState.ACTIVE,     True,  BPColors.GOOD),
+  ])
+  def test_tint(self, monkeypatch, state, link_up, expected):
+    assert self._tint(monkeypatch, state, link_up) == expected
+
+  def test_link_down_does_not_mask_failure(self, monkeypatch):
+    """Regression: ordering matters. FAILED must survive a down link."""
+    assert self._tint(monkeypatch, ChestnutState.FAILED, False) == BPColors.DANGER
