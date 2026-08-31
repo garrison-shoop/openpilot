@@ -4,6 +4,12 @@ Working notes for keeping this fork current. Written after the 2026-08 restructu
 sync, which surfaced a long tail of runtime-only breakage; most of this file is the
 list of ways that went wrong and how to catch each one *before* flashing.
 
+**Keep this file current.** Any change to the sync process — a new gotcha, a different
+resolution for a recurring conflict, or something moving out of the "deliberately not
+done" list — gets written down here in the same change. The whole point is that the
+work can be resumed cold, and a stale entry is worse than a missing one because it
+gets trusted.
+
 Read `AGENTS.md` at the repo root first — it is the authoritative guide to the
 three-layer architecture (stock openpilot → sunnypilot → BluePilot) and the marker
 convention. This file is the operational companion to it.
@@ -203,6 +209,12 @@ Notes on writing checkers, learned the hard way:
 - capnp named groups are written `name :group {`, not `group name {`.
 - Follow `msgq.*`/`opendbc.*` imports too, not just `openpilot.*` — `VisionStreamType`
   moved *out of* msgq.
+- **Stubbed enum members all compare equal.** If the harness stubs a module that
+  exports an enum (e.g. `ChestnutState`), every state assertion becomes a tautology
+  that passes regardless. Give the stub a real `enum.Enum`.
+- When sanity-testing by temporarily breaking a file, restore from a **saved copy**,
+  not `git checkout <file>` — that restores from HEAD and silently discards whatever
+  else was uncommitted in it.
 
 ## 7. Running tests without a built tree
 
@@ -263,18 +275,39 @@ Duplicate commits (e.g. a bp-dev commit already cherry-picked here) are dropped
 automatically — rebase reports *"patch contents already upstream"*.
 
 If a rename-heavy sync broke a feature branch, it is often cleaner to rebuild the
-stack: fix the lowest branch, then `git branch -f` the next one to it and cherry-pick
-the feature commit back on.
+stack than to fight successive rebases: fix the lowest branch, then `git branch -f`
+the next one onto it and cherry-pick that branch's own commit back.
+
+**Put each fix on the lowest branch that needs it.** A fix committed on
+`bp-egpu-storage` does not reach `bp-egpu-3x`; committed on `bp-egpu-3x` it reaches
+both, plus cangps. If you notice after committing, cherry-pick it down and rebuild
+the stack above — cheaper than three divergent copies.
 
 Then verify per branch and `git push --force-with-lease`.
 
-## 10. Things deliberately not done
+## 10. Preferred pattern: delegate to upstream, keep the delta small
+
+When upstream grows a feature BluePilot already had, prefer **driving BluePilot's
+version from upstream's state** over keeping a parallel implementation. Less code to
+re-verify each sync, and upstream's improvements arrive for free.
+
+Worked example — the eGPU icon. Upstream added a six-state `ChestnutState`
+(DISCONNECTED/UNCOMPILED/READY/LOADING/ACTIVE/FAILED); BluePilot had its own three
+colours. Rather than pick one, the icon now reads `ui_state.chestnut_state` and adds
+a single check for the one thing upstream cannot express: `chestnutPresent` means
+only that the ASM bridge enumerated over USB, so an empty dock is indistinguishable
+from a populated one. `chestnut_link_up` (trained PCIe link) is the difference.
+
+Net effect: gained LOADING and FAILED, kept the link distinction, and BluePilot's
+custom surface shrank to one `if`. That is the shape to aim for.
+
+Ordering within such a mapping matters — put the most actionable state first
+(FAILED before the link check, so a model failure is not masked by a quiet probe).
+
+## 11. Things deliberately not done
 
 - **opendbc_repo full sync** (~170 files, +8.5k/-6.2k vs upstream's pin 06743dfb3).
   The real fix for 5g; needs its own session and must preserve the 25 BluePilot-marked
   files in that tree.
-- **Adopting upstream's `ChestnutState` enum** in BluePilot's sidebar. Upstream's
-  6-state model is richer but still has no "enumerated, PCIe link not trained" state,
-  which BluePilot's grey icon shows. Kept ours deliberately.
 - `bluepilot/system/tests` in pyproject `testpaths` — upstream removed that key in
   the restructure, so there is no target here.
