@@ -183,7 +183,7 @@ class UIState(UIStateSP):
     self.started = self.sm["deviceState"].started and self.ignition
 
     # BluePilot: whether a GPU is actually seated and its PCIe link trained -- distinct from
-    # usbgpu, which only means the ASM bridge enumerated. hardwared probes this while modeld is
+    # chestnut_present, which only means the ASM bridge enumerated. hardwared probes this while modeld is
     # idle; once modeld owns the device it reports the LTSSM in chestnutState instead.
     link = self.sm["deviceState"].chestnutLinkUp
     if self.sm.alive["chestnutState"] and self.sm.valid["chestnutState"]:

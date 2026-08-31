@@ -30,7 +30,7 @@ def make_sidebar(monkeypatch, *, alive=True, valid=True, usage=42.0, temp=78.5, 
       return SimpleNamespace(gpuUsagePercent=usage, tempC=temp)
 
   import bluepilot.ui.widgets.sidebar as sb
-  monkeypatch.setattr(sb, "ui_state", SimpleNamespace(sm=_SM(), usbgpu=True))
+  monkeypatch.setattr(sb, "ui_state", SimpleNamespace(sm=_SM(), chestnut_present=True))
   return sidebar
 
 

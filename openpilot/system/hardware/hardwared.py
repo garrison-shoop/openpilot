@@ -345,7 +345,7 @@ def hardware_thread(end_event, hw_queue) -> None:
                                  extra_text=chestnut_target if chestnut_needs_switch else None)
     # BluePilot: publish whether a GPU is actually seated, not just whether the dock enumerated.
     # modeld owns the device once it is loading or running the big model; defer to it then.
-    modeld_owns_gpu = params.get_bool("UsbGpuLoading") or bool(params.get("UsbGpuActive"))
+    modeld_owns_gpu = params.get_bool("ChestnutLoading") or bool(params.get("ChestnutActive"))
     chestnut.update_link(msg.deviceState.chestnutPresent, modeld_owns_gpu)
     msg.deviceState.chestnutLinkUp = chestnut.link_up
     # End BluePilot
