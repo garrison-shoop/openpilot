@@ -15,7 +15,7 @@ import pyray as rl
 from collections.abc import Callable
 from openpilot.cereal import log
 from openpilot.common.params import Params
-from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.selfdrive.ui.ui_state import ui_state, ChestnutState
 from openpilot.common.hardware import PC
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -338,6 +338,25 @@ class SidebarBP(Widget):
       self._egpu_temp = "N/A"
       self._egpu_reporting = False
 
+  @staticmethod
+  def _chestnut_tint():
+    """Colour for the eGPU icon. See the render site for the state table.
+
+    FAILED is checked before the link so a big-model failure stays visible rather than being
+    masked by a link probe that has gone quiet, and the link check sits above the remaining
+    upstream states because none of them distinguish an empty dock from a populated one.
+    """
+    state = ui_state.chestnut_state
+    if state is ChestnutState.FAILED:
+      return BPColors.DANGER
+    if not ui_state.chestnut_link_up:
+      return BPColors.DISABLED
+    if state is ChestnutState.UNCOMPILED:
+      return BPColors.WARNING
+    if state is ChestnutState.LOADING:
+      return BPColors.ACCENT
+    return BPColors.GOOD
+
   def _egpu_color(self):
     if not self._egpu_reporting:
       return BPColors.DISABLED
@@ -558,18 +577,18 @@ class SidebarBP(Widget):
     if 'fan' in self._button_rects:
       self._fan_widget.render(self._button_rects['fan'])
 
-    # eGPU (chestnut) indicator. Three states, because the dock enumerating over USB says nothing
-    # about a GPU being in it:
-    #   grey   - dock detected, no PCIe link (empty dock, or card not seated/powered)
-    #   yellow - GPU attached and linked, but the big model is not compiled yet
-    #   green  - linked and running the big model
-    if ui_state.chestnut_present and self._egpu_rect is not None:
-      if not ui_state.chestnut_link_up:
-        tint = BPColors.DISABLED
-      elif not ui_state.chestnut_compiled:
-        tint = BPColors.WARNING
-      else:
-        tint = BPColors.GOOD
+    # eGPU (chestnut) indicator. Driven by upstream's ChestnutState so it tracks their state
+    # machine for free, plus the one thing that model cannot express: chestnutPresent only means
+    # the ASM bridge enumerated over USB, so an empty dock -- or a card that is not seated or
+    # powered -- looks identical to a working one. chestnut_link_up is the trained PCIe link.
+    #   hidden - no dock
+    #   red    - big model failed (restart the car)
+    #   grey   - dock present but PCIe link down: no GPU seated/powered  [BluePilot-only]
+    #   yellow - GPU linked, big model not compiled yet (needs a rebuild)
+    #   blue   - loading the big model
+    #   green  - ready or running
+    if ui_state.chestnut_state is not ChestnutState.DISCONNECTED and self._egpu_rect is not None:
+      tint = self._chestnut_tint()
       icon = gui_app.texture("icons_mici/chestnut.png", BPConstants.EGPU_WIDTH, BPConstants.EGPU_HEIGHT)
       rl.draw_texture_ex(icon, rl.Vector2(self._egpu_rect.x, self._egpu_rect.y), 0.0, 1.0, tint)
 
