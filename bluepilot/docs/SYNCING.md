@@ -94,6 +94,10 @@ git apply --check /tmp/p.patch && git apply /tmp/p.patch
 Preserve the original author: `git commit --author="Name <email>"` and add a
 `(cherry picked from commit <sha>)` trailer plus a note on what you remapped.
 
+**Special case:** a bp-dev commit touching only `opendbc_repo/` needs no remapping at
+all — that path is identical in both trees, so `git apply` works directly. Check the
+file list first; it is often the whole commit for Ford car-layer fixes.
+
 ## 4. The restructure, in one table
 
 Upstream moved everything under `openpilot/`. bp-dev and older forks did not.
@@ -162,6 +166,14 @@ only reason it was noticed.
 no `bin/`, no `lib/` — while the runtime python is `/usr/local/venv`. So
 `sync_python_env()` may not be installing into the venv the device imports from.
 Worth investigating before relying on any lockfile addition.
+
+### 5f-bis. `hardwared.py` is a recurring conflict site
+Upstream keeps reworking the `Chestnut` class and its call site (offroad alert ->
+`chestnut_status.update(...)`, added `mismatch`/`failed`). BluePilot's PCIe link probe
+lives in the same two places, so expect a conflict there on most chestnut-touching
+syncs. Both sides have always been additive so far: keep upstream's block, append
+BluePilot's, and let any later rename commit in the same rebase fix the param names
+rather than pre-empting it.
 
 ### 5g. The vendored opendbc is stale
 This is the big one. We vendor `opendbc_repo` as a real tree, so the sunnypilot sync
@@ -277,6 +289,11 @@ automatically — rebase reports *"patch contents already upstream"*.
 If a rename-heavy sync broke a feature branch, it is often cleaner to rebuild the
 stack than to fight successive rebases: fix the lowest branch, then `git branch -f`
 the next one onto it and cherry-pick that branch's own commit back.
+
+**A rebase loop reports "CLEAN" for branches that did not move.** If a lower branch
+conflicts and you abort it, the branches stacked on it still "succeed" — because they
+rebase onto that branch's *unchanged* tip. Their SHAs are identical to before, which is
+the tell. Fix the lower branch first, then rebuild the ones above it.
 
 **Put each fix on the lowest branch that needs it.** A fix committed on
 `bp-egpu-storage` does not reach `bp-egpu-3x`; committed on `bp-egpu-3x` it reaches
