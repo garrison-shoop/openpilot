@@ -38,7 +38,11 @@ you end up with the same upstream commits appearing on divergent bases.
 git remote add sunnypilot https://github.com/sunnypilot/sunnypilot.git
 git remote add bluepilot  https://github.com/BluePilotDev/bluepilot.git
 git remote add spopendbc  https://github.com/sunnypilot/opendbc.git   # for opendbc comparisons
+git remote add cgrin      https://github.com/cgrin/bluepilot.git       # can-gps-time (cangpsd)
 ```
+
+`cgrin/can-gps-time` is a third upstream, feeding `bp-egpu-storage-cangps` only. It
+also predates the restructure, so the same path-remapping rules apply.
 
 Careful: `git remote | grep bluepilot` also matches forks whose URL contains
 "bluepilot" (e.g. cgrin's). Use `git remote | grep -qx bluepilot`.
@@ -237,8 +241,16 @@ finder that stubs any non-`openpilot`/`bluepilot`/`opendbc` module. pyray stubs 
 return **numbers** (gui_app does arithmetic at import); everything else should return
 objects with permissive attributes.
 
-Set `PYTHONPATH=.:opendbc_repo`. Suites: sidebar eGPU 12, external storage 54,
-cangpsd 90, ALP lane-center-trim 27.
+Set `PYTHONPATH=.:opendbc_repo`. Suites (approximate, they grow): sidebar eGPU 22,
+external storage 54, cangps_fallback 25, cangpsd ~100, ALP lane-center-trim 27, Ford
+carstate_ext 4.
+
+**What the harness cannot run:** anything needing the compiled `opendbc.can.parser`.
+A stubbed `CANParser` returns stubs where the decode expects numbers, so suites that
+exercise real frame decoding fail on arithmetic — `test_cangpsd_main.py` (drives
+main()'s whole loop) and two decode cases in `test_cangpsd.py`. Those are harness
+limits, not defects; they need a device or a built tree. Do not "fix" them by
+loosening assertions.
 
 `uv lock` locally needs the path-dependency submodules checked out
 (`git submodule update --init --depth 1 panda rednose_repo teleoprtc_repo tinygrad_repo msgq_repo`)
@@ -320,6 +332,13 @@ custom surface shrank to one `if`. That is the shape to aim for.
 
 Ordering within such a mapping matters — put the most actionable state first
 (FAILED before the link check, so a model failure is not masked by a quiet probe).
+
+**When an upstream ships the same fix you carried locally, drop yours and take
+theirs.** cangpsd is the worked example: a local patch made it publish on the topic
+the device actually reads, and cgrin later implemented the same resolution through
+`get_gps_location_service()`. Re-porting their branch wholesale and deleting the local
+commits left the delta as path remapping only. Check for this before rebasing a
+carried patch forward — `git log <upstream>..` against the area you patched.
 
 ## 11. Things deliberately not done
 
