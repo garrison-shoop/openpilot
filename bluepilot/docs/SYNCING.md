@@ -102,6 +102,16 @@ Preserve the original author: `git commit --author="Name <email>"` and add a
 all — that path is identical in both trees, so `git apply` works directly. Check the
 file list first; it is often the whole commit for Ford car-layer fixes.
 
+**Special case: `README.md`.** Our README differs from bp-dev's only in the lines that
+record the sunnypilot sync date and AGNOS version (three lines as of the bp-7.0 README:
+the intro "synced with sunnypilot master as of …", the "Based on" line, and the
+release-summary sentence). A bp-dev README rewrite will not patch cleanly over them.
+Take bp-dev's file wholesale (`git show bluepilot/bp-dev:README.md > README.md`),
+re-apply those lines, and confirm `git diff bluepilot/bp-dev -- README.md` shows nothing
+else. Leave release-history entries alone: they describe what shipped. bp-dev's README
+still points at pre-restructure asset paths (e.g. `selfdrive/assets/img_bluepilot_boot.jpg`).
+Flag that upstream; don't fix it only here.
+
 ## 4. The restructure, in one table
 
 Upstream moved everything under `openpilot/`. bp-dev and older forks did not.
@@ -234,23 +244,34 @@ Notes on writing checkers, learned the hard way:
 
 ## 7. Running tests without a built tree
 
-Most suites need compiled artifacts (`libparams_c`, `msgq`, `opendbc.can.parser`).
-A stub harness makes them runnable on a laptop: pre-stub `capnp`, `openpilot.cereal`,
-`openpilot.common.params`, `openpilot.selfdrive.ui.ui_state`, plus a `sys.meta_path`
-finder that stubs any non-`openpilot`/`bluepilot`/`opendbc` module. pyray stubs must
-return **numbers** (gui_app does arithmetic at import); everything else should return
-objects with permissive attributes.
+Most suites need compiled artifacts (`libparams_c`, `msgq`). The **lightest harness
+that works** stubs only those two and uses real packages for everything else:
 
-Set `PYTHONPATH=.:opendbc_repo`. Suites (approximate, they grow): sidebar eGPU 22,
-external storage 54, cangps_fallback 25, cangpsd ~100, ALP lane-center-trim 27, Ford
-carstate_ext 4.
+- a `stubs/msgq/` package (and `stubs/msgq/visionipc/`) whose module `__getattr__`
+  returns a fresh **class** per name. It has to be a class, because annotations like
+  `SubSocket | None` fail on instances. Also define real `MultiplePublishersError` and
+  `IpcError` exception classes.
+- a pytest plugin (`stubs/bpharness.py`, loaded with `-p bpharness`) that puts an
+  in-memory dict-backed `Params` into `sys.modules["openpilot.common.params"]`.
+- a uv venv (`--python 3.12.12`) with `numpy pytest pycapnp zstandard pyzmq
+  setproctitle requests pyjwt cryptography raylib psutil smbus2 qrcode pillow sympy
+  crcmod-plus`. `pyjwt` is the easy one to forget: the external-storage import chain
+  reaches `openpilot.common.api`.
 
-**What the harness cannot run:** anything needing the compiled `opendbc.can.parser`.
-A stubbed `CANParser` returns stubs where the decode expects numbers, so suites that
-exercise real frame decoding fail on arithmetic — `test_cangpsd_main.py` (drives
-main()'s whole loop) and two decode cases in `test_cangpsd.py`. Those are harness
-limits, not defects; they need a device or a built tree. Do not "fix" them by
+Run with `PYTHONPATH=.:opendbc_repo:<stubs dir>`. This runs **all** of the suites below,
+including `test_cangpsd_main.py` and the frame-decode cases, which the older
+heavy harness could not run. The older harness pre-stubbed `capnp`, `openpilot.cereal`,
+`ui_state` and every non-project module through a `sys.meta_path` finder. Its stubbed
+`CANParser` returned stubs where numbers were expected. Use it only when real
+packages won't import. Under it, pyray stubs must return **numbers**, and a
+decode-suite failure is a harness limit, not a defect. Don't "fix" those failures by
 loosening assertions.
+
+Per branch (as of 2026-09-24): sync and egpu-3x run ALP lane-center-trim (27). The
+storage branches add external storage (81 total). cangps adds cangps_fallback,
+cangpsd and cangpsd_main (218 total). Test files are nested, so enumerate them with
+explicit paths or bash globs. A zsh glob with no match aborts the whole command line,
+and `git ls-files 'a/**/b'` needs `:(glob)`.
 
 `uv lock` locally needs the path-dependency submodules checked out
 (`git submodule update --init --depth 1 panda rednose_repo teleoprtc_repo tinygrad_repo msgq_repo`)
@@ -313,6 +334,13 @@ both, plus cangps. If you notice after committing, cherry-pick it down and rebui
 the stack above — cheaper than three divergent copies.
 
 Then verify per branch and `git push --force-with-lease`.
+
+**Rewriting a pushed sync commit** (e.g. to fix a merge message after the README commit
+is already on top): back up the tip, `git reset --hard <merge>`, `git commit --amend`,
+`git cherry-pick <old tip>`, confirm `git diff <old tip> HEAD` is empty, then push with
+`--force-with-lease=<branch>:<old tip>`. `git cherry-pick` has **no `-q`**. It prints
+usage and does nothing, so an `&&` chain after it can push the branch without the
+commit.
 
 ## 10. Preferred pattern: delegate to upstream, keep the delta small
 
