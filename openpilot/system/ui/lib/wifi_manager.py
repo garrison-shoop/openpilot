@@ -214,10 +214,11 @@ class WifiManager:
     self._scan_thread = threading.Thread(target=self._network_scanner, daemon=True)
     self._state_thread = threading.Thread(target=self._monitor_state, daemon=True)
     # BluePilot: favorite network auto-connect
-    if is_bluepilot():
+    if is_bluepilot() and not self._exit:
       from openpilot.selfdrive.ui.bp.lib.wifi_favorite import WifiFavoriteManager
       self._favorite_manager = WifiFavoriteManager(self)
-    self._initialize()
+    if not self._exit:
+      self._initialize()
     atexit.register(self.stop)
 
   def _initialize(self):
