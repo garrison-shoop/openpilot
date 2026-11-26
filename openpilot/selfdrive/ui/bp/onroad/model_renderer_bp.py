@@ -133,8 +133,6 @@ class ModelRendererBP(RadRacerRoadMixin, ModelRenderer):
       rect.x - CLIP_MARGIN, rect.y - CLIP_MARGIN, rect.width + 2 * CLIP_MARGIN, rect.height + 2 * CLIP_MARGIN
     )
 
-    self._experimental_mode = sm['selfdriveState'].experimentalMode
-
     live_calib = sm['extrinsicsCalibration']
     from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
     self._path_offset_z = live_calib.height[0] if live_calib.height else HEIGHT_INIT[0]
@@ -185,7 +183,9 @@ class ModelRendererBP(RadRacerRoadMixin, ModelRenderer):
       self._dash_phase = (self._dash_phase + max(0.0, v_ego) / gui_app.target_fps) % period
 
     self._draw_lane_lines()
-    self._draw_path(sm)
+    self._draw_path()
+    # BluePilot: mirror upstream _render (this method replaces it wholesale)
+    self.blendful.draw(self._rect)
 
     # BluePilot: In Rad Racer theme, leads are drawn as sprites by RadRacerTheme
     if render_lead_indicator and radar_state and not self._rad_racer:
@@ -509,7 +509,7 @@ class ModelRendererBP(RadRacerRoadMixin, ModelRenderer):
 
     return (points + normal * (width * scales)[:, None]).astype(np.float32)
 
-  def _draw_path(self, sm):
+  def _draw_path(self):
     """Draw path with status-colored edges."""
     # BluePilot: Rad Racer theme draws the path as a dashed center line in _draw_rad_racer_road
     if self._rad_racer:
@@ -521,7 +521,7 @@ class ModelRendererBP(RadRacerRoadMixin, ModelRenderer):
       # BluePilot: theme pack path colors replace the throttle/no-throttle gradient
       draw_polygon(self._rect, self._path.projected_points, gradient=themed_gradient)
     else:
-      super()._draw_path(sm)
+      super()._draw_path()
 
     self._draw_path_edges()
 

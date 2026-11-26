@@ -76,6 +76,16 @@ class NanoFFModel:
     return pred
 
 
+# BluePilot: compat shim for the vendored (stale) opendbc. sunnypilot's UI and sunnylink now
+# import has_bsm(), which upstream opendbc #3788 introduced when it replaced CP.enableBsm with
+# per-brand HAS_BSM flags. Our vendored tree predates #3788, so every brand (Tesla and Rivian
+# included) still reports blind-spot support through CP.enableBsm. Drop this when opendbc is
+# synced properly (SYNCING.md 5g / 11).
+def has_bsm(CP: structs.CarParams, CP_SP: structs.CarParamsSP | None) -> bool:
+  return bool(CP.enableBsm)
+# End BluePilot
+
+
 def setup_interfaces(CI, CP: structs.CarParams, CP_SP: structs.CarParamsSP,
                      params_list: list[dict[str, str]] | None = None,
                      can_recv: CanRecvCallable | None = None, can_send: CanSendCallable | None = None) -> None:
