@@ -327,13 +327,34 @@ grep -ah "is dead with" /data/log/* | tail
 grep -ah "process_not_running" /data/log/* | tail -3
 ```
 
-**"Install stuck at ~90%" is usually a failed build, not a hang.** `bp_build.py`
-retries a failed scons run twice (`-j4`, then `-j1`). Each retry rebuilds whatever
-was still in flight, and the tinygrad model compile alone takes many minutes. So
-one compile error can mean a long stall near the top of the bar, then a restart,
-before the failure screen appears. Look for the error before assuming a hang. It is
-in the spinner's log view (`bp_build.py` streams every scons line into it).
-On the 2026-11 sync it was the panda/opendbc break in 5g.
+**"Stuck at ~90%" means different things on the two progress screens.** Find out
+which screen it is before debugging.
+
+- **AGNOS installer** (fresh install, before any build). The installer runs
+  `git clone --depth=1 --recurse-submodules` and maps git's progress lines to the
+  bar. A *submodule's* "Receiving objects" and "Resolving deltas" land at ~88-93%,
+  and `--depth` does **not** apply to submodules, so a large submodule history sits
+  at ~90% for as long as it takes. The installer also `assert`s on a non-zero git
+  exit, so a clone *failure* freezes the screen on the last percentage with no
+  error. Reproduce on a Mac with the installer's exact command (from
+  `openpilot/selfdrive/ui/installer/installer.cc`, `freshClone()`). Enable LFS via
+  a throwaway `GIT_CONFIG_GLOBAL` if `git lfs install` was never run locally.
+  2026-11: `sunnypilot/tinygrad` gained ~1.7 GB of history on 2026-11-06 (mock-GPU
+  `gfx1200_hw/*.tar.part*`). The full clone took 61 min on a Mac and resolved 96k
+  deltas. Fixed with `shallow = true` on that `.gitmodules` entry (41 s,
+  296 deltas). This affects *every* branch using that submodule URL, so reverting
+  to an older sync does not help. The shallow clone still pulls ~855 MB, because
+  the default branch's tip holds the tarballs. A BluePilot-owned tinygrad fork
+  whose default branch sits at our pin would remove that too.
+- **BluePilot build spinner** (`bp_build.py`, after the clone). A failed scons run
+  is retried twice (`-j4`, then `-j1`). Each retry rebuilds whatever was still in
+  flight, and the tinygrad model compile alone takes many minutes, so one compile
+  error looks like a long stall near the top of the bar, then a restart. The error
+  is in the spinner's log view. 2026-11: the panda/opendbc break in 5g.
+
+After any sync that moves a submodule pin or URL, check the submodule repos' sizes
+(`gh api repos/<owner>/<repo> --jq .size`, in KB). A fork that is suddenly 10x
+upstream will stall fresh installs.
 
 `dmesg` does **not** survive a reboot — capture it before rebooting or the OOM
 evidence is gone. Params under `/data/params/d/` flagged `CLEAR_ON_MANAGER_START`
