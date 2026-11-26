@@ -189,12 +189,28 @@ syncs. Both sides have always been additive so far: keep upstream's block, appen
 BluePilot's, and let any later rename commit in the same rebase fix the param names
 rather than pre-empting it.
 
+### 5f-ter. Upstream deletes a feature BluePilot subclasses
+A merge reports no conflict when upstream deletes a file outright and BluePilot's subclass
+lives in a different file. 2026-11: upstream removed Experimental Mode (#39043, #39097).
+`onroad/exp_button.py`, the `UIConfig` button/border/icon sizes, the `ExperimentalMode`
+param readers, `selfdriveState.experimentalMode` (moved to `deprecated`) and
+`experimental.png` all went. `ExpButtonBP` subclassed that button, and `HudRendererBP`
+used the removed sizes. Both were fatal at `ui` import. Upstream also changed
+`ModelRenderer._draw_path(sm)` to `_draw_path()` on TICI and MICI, and dropped MICI
+`_map_to_screen`, which the shared Rad Racer mixin calls.
+
+Fix the *intent*, not just the import. The button had nothing left to toggle, so it
+became a display-only `SteeringWheelBP` that keeps the BluePilot look. Where a BP class
+replaces a parent method wholesale (e.g. `ModelRendererBP._render`), diff the parent's new
+version and carry over what upstream added (here `self.blendful.draw()`). Otherwise new
+upstream features silently vanish on BluePilot. Recipe steps 8-9 catch this class.
+
 ### 5g. The vendored opendbc is stale
 This is the big one. We vendor `opendbc_repo` as a real tree, so the sunnypilot sync
 updates `openpilot/` **around** it. Stock upstream code then reaches for schema the
-old opendbc does not have. It has bitten five times:
+old opendbc does not have. It has bitten six times:
 `liveParameters`, `CarState.carNotReady`, `CarControl.driverMonitoringEscalation`,
-`SteerControlType.curvature`, and the panda `safety_tick` break below.
+`SteerControlType.curvature`, the panda `safety_tick` break, and `has_bsm` (both below).
 
 `car.capnp` has been swept for fields, enums and structs against upstream's pin, so
 the *schema* interface should be clean. The **Python and safety code in that tree is
@@ -214,6 +230,16 @@ commaai/opendbc #3759) into `safety.h` and `declarations.h`, and updating the
 libsafety test shim. Take sunnypilot's form, not comma's: ours carries sunnypilot's
 MADS lag exit and `ignore_frequency_check`, so comma's patch will not apply.
 Recipe step 7 catches this class in seconds.
+
+**It also hits plain Python imports from `opendbc.sunnypilot`.** On 2026-11, sunnypilot's
+`ui_state.py`, `lane_change_settings.py` and sunnylink `capabilities.py` started importing
+`has_bsm` from `opendbc.sunnypilot.car.interfaces`. Upstream opendbc #3788 added it when it
+replaced `CP.enableBsm` with per-brand `HAS_BSM` flags. Our tree predates #3788, so `ui`
+died on import and the device sat on the boot logo (section 8). Fixed with a marked shim
+returning `CP.enableBsm`, which every brand in our tree still sets. #3788 itself touches
+25 car files including Ford's `carstate.py`/`interface.py`; it belongs to the full opendbc
+sync (section 11), not a launch fix. Delete the shim when that lands. Recipe step 8 (import
+smoke) catches this class.
 
 ## 6. Verification recipe
 
@@ -256,9 +282,42 @@ arm-none-eabi-gcc $F board/main.c && arm-none-eabi-gcc $F -DPANDA_BODY board/bod
 #    git archive <sp opendbc pin> opendbc/safety | tar -x -C /tmp/spodbc, then -I/tmp/spodbc.
 #    Clean up with `git -C panda clean -fdx board/obj`, NOT rm -rf: board/obj/.placeholder
 #    is tracked, and deleting it leaves the panda submodule dirty.
+
+# Steps 8-9 use bluepilot/docs/sync_checks/. Run each on the new tree AND the previous
+# known-good sync, then diff: only NEW lines matter, since each tree has a stable baseline
+# of harmless hits (7 from bp_class_check.py as of 2026-11).
+
+# 8. import smoke -- actually import the UI and every managed Python process. This is the
+#    check that reproduced the 2026-11 boot-logo crash; the static checks only narrowed it.
+#    It stubs only Params and msgq. Module list for processes:
+#    PythonProcess/DaemonProcess args in openpilot/system/manager/process_config.py.
+PYTHONPATH=.:opendbc_repo:bluepilot/docs/sync_checks/stubs uv run -q --no-project \
+  --python 3.12.12 --with numpy --with pycapnp --with zstandard --with pyzmq \
+  --with setproctitle --with requests --with pyjwt --with cryptography --with raylib \
+  --with psutil --with smbus2 --with qrcode --with pillow --with sympy --with crcmod-plus \
+  --with jeepney --with pyyaml --with tqdm --with scipy --with pycryptodome --with libusb1 \
+  --with sentry-sdk --with casadi -- python bluepilot/docs/sync_checks/import_smoke.py \
+  openpilot.selfdrive.ui.layouts.main openpilot.selfdrive.ui.mici.layouts.main \
+  openpilot.sunnypilot.sunnylink.capabilities <process modules...>
+#    Harness-limited (not bugs): plannerd (unbuilt acados code), pandad (panda python),
+#    locationd/paramsd (rednose), modeld/controlsd (tinygrad: add tinygrad_repo to
+#    PYTHONPATH). In zsh, pass module lists as an array: an unquoted $VAR is ONE arg.
+
+# 9. static checks for what import smoke can't reach (code that only runs at draw time)
+python3 bluepilot/docs/sync_checks/import_check.py .     # imports + imported names exist
+python3 bluepilot/docs/sync_checks/bp_class_check.py .   # *BP classes vs NEW parent chain:
+                                                         #   missing self./super() members,
+                                                         #   override signature drift, UI_CONFIG
+python3 bluepilot/docs/sync_checks/ui_state_check.py .   # ui_state.<attr> still exists
+#    And grep BluePilot code for every field the schema diff (step 3) moved into a
+#    `deprecated` group. Use python `re` or `git grep -P`: macOS `grep -E` has no `\b` and
+#    silently matches nothing. That hid the experimentalMode read on 2026-11.
 ```
 
 Notes on writing checkers, learned the hard way:
+
+- **Check your regex engine.** macOS `grep -E` treats `\b` as a literal, so a search for
+  `\.experimentalMode\b` returned nothing and was reported as "no hits".
 
 - **Sanity-test the checker against a bug it should catch**, by re-introducing one.
   Two checkers written during this work silently failed that test.
@@ -314,6 +373,12 @@ for macOS arm64.
 `manager` only wraps **its own** startup in a try/except + TextWindow. A managed child
 that dies is just logged — so a dead `ui` leaves the boot splash up with no error on
 screen, which looks identical to a hung boot.
+
+Boot logo for minutes after a successful build = suspect `ui` first. You usually don't need
+the device to find out why: recipe step 8 (import smoke) reproduced the 2026-11 crash on a
+Mac in seconds (`ImportError: cannot import name 'has_bsm'`). After a factory reset there
+is no SSH (keys are wiped) and no settings screen to re-add them, so off-device reproduction
+is often the *only* option.
 
 ```bash
 # a process's own traceback
