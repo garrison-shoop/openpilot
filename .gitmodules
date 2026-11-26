@@ -13,6 +13,10 @@
 [submodule "tinygrad"]
   path = tinygrad_repo
   url = https://github.com/sunnypilot/tinygrad.git
+  # BluePilot: shallow clone. sunnypilot/tinygrad grew to ~1.7 GB of history in Nov 2026
+  # (mock-GPU test tarballs); a full-history clone stalls the AGNOS installer at ~90%.
+  shallow = true
+  # End BluePilot
 [submodule "sunnypilot/neural_network_data"]
 	path = openpilot/sunnypilot/neural_network_data
   url = https://github.com/sunnypilot/neural-network-data.git
