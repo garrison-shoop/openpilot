@@ -36,7 +36,7 @@ uint32_t microsecond_timer_get(void) {
 #include "opendbc/safety/ignition.h"
 
 void safety_tick_current_safety_config() {
-  safety_tick(&current_safety_config);
+  safety_tick();
 }
 
 bool safety_config_valid() {
