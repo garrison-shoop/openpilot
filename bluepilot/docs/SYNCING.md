@@ -176,7 +176,7 @@ Most such imports are wrapped in `try/except ImportError`, so a missing one degr
 a feature silently instead of crashing. `qcomgpsd`'s was not guarded, which is the
 only reason it was noticed.
 
-**Unresolved:** `/data/openpilot/.venv` on device contains only `.op_synced_lock` —
+**Resolved 2026-11 (see section 8):** the runtime venv is the read-only AGNOS `/usr/local/venv`. Original note: `/data/openpilot/.venv` on device contains only `.op_synced_lock` —
 no `bin/`, no `lib/` — while the runtime python is `/usr/local/venv`. So
 `sync_python_env()` may not be installing into the venv the device imports from.
 Worth investigating before relying on any lockfile addition.
@@ -373,6 +373,36 @@ for macOS arm64.
 `manager` only wraps **its own** startup in a try/except + TextWindow. A managed child
 that dies is just logged — so a dead `ui` leaves the boot splash up with no error on
 screen, which looks identical to a hung boot.
+
+**Off-device checks are not enough; test on the device from a side folder.** On 2026-11
+every import and static check passed, and `ui` still died. A stock file with BluePilot
+edits (`layouts/main.py`) had been kept wholesale from the previous sync, so it still
+called `HomeLayout.set_settings_callback`, which upstream had removed. That only fails
+when `MainLayout()` is constructed. A real run found it in minutes, without replacing
+the device's installed software:
+
+```bash
+# on device, with whatever is installed left in /data/openpilot
+git clone --depth 1 -b <branch> <url> /data/bp-test && cd /data/bp-test
+git submodule update --init --depth 1 && git lfs install --local && git lfs pull
+for p in msgq_repo/msgq:msgq opendbc_repo/opendbc:opendbc rednose_repo/rednose:rednose \
+         teleoprtc_repo/teleoprtc:teleoprtc tinygrad_repo/tinygrad:tinygrad; do ln -sfn ${p%%:*} ${p##*:}; done
+# stop the running manager FIRST: building alongside it OOM-kills the rednose
+# generated C files (scons "Error -9"), and the SSH session drops when it stops.
+# Use a script file. `pkill -f manager.py` inside `bash -c "... manager.py"` kills itself.
+export PATH=/usr/comma/shims:/usr/local/venv/bin:$PATH VIRTUAL_ENV=/usr/local/venv
+source ./launch_env.sh; export PYTHONPATH=/data/bp-test
+scons -j4 && cd openpilot/system/manager && ./manager.py > /data/bp-test/manager.out 2>&1
+# red names in manager.out's status line are dead processes; the traceback is in
+# grep -ah '"daemon": "ui"' /data/log/* | grep -a '"crash"' | tail -1
+# reboot to return to the installed software; rm -rf /data/bp-test when done
+```
+
+The device's runtime Python is `/usr/local/venv` on the **read-only** rootfs.
+`bp_build.py`'s `uv sync` cannot install into it, which settles the 5f question: only
+packages in the AGNOS image exist at runtime. On AGNOS 19.9, BluePilot's `xattr`,
+`pyserial`, `netifaces` and `websockets` are missing. Their imports are guarded, so those
+features degrade quietly.
 
 Boot logo for minutes after a successful build = suspect `ui` first. You usually don't need
 the device to find out why: recipe step 8 (import smoke) reproduced the 2026-11 crash on a
