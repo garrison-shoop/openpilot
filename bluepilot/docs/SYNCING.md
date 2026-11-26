@@ -192,14 +192,28 @@ rather than pre-empting it.
 ### 5g. The vendored opendbc is stale
 This is the big one. We vendor `opendbc_repo` as a real tree, so the sunnypilot sync
 updates `openpilot/` **around** it. Stock upstream code then reaches for schema the
-old opendbc does not have. It has bitten four times:
+old opendbc does not have. It has bitten five times:
 `liveParameters`, `CarState.carNotReady`, `CarControl.driverMonitoringEscalation`,
-`SteerControlType.curvature`.
+`SteerControlType.curvature`, and the panda `safety_tick` break below.
 
 `car.capnp` has been swept for fields, enums and structs against upstream's pin, so
 the *schema* interface should be clean. The **Python and safety code in that tree is
 still ~170 files behind**. Syncing it properly is its own project and should preserve
 the 25 BluePilot-marked files in there.
+
+**Panda bumps hit the safety C code, not just the schema.** The `panda` submodule is
+a real gitlink that moves with every sunnypilot merge, and its firmware compiles
+against *our* `opendbc_repo/opendbc/safety/` headers (`opendbc.INCLUDE_PATH` in
+`panda/SConscript`). Upstream pairs each panda bump with the opendbc commit it needs.
+We only get the panda half. The 2026-11 sync moved panda to `8a16e089`, which
+contains panda #2458: `board/main.c` calls `safety_tick()` with no argument, while
+our opendbc still declared `safety_tick(const safety_config *)`. The scons build
+failed on device with `board/main.c:250:7: error: too few arguments to function
+'safety_tick'`. Fixed by porting sunnypilot/opendbc's `safety_tick(void)` (from
+commaai/opendbc #3759) into `safety.h` and `declarations.h`, and updating the
+libsafety test shim. Take sunnypilot's form, not comma's: ours carries sunnypilot's
+MADS lag exit and `ignore_frequency_check`, so comma's patch will not apply.
+Recipe step 7 catches this class in seconds.
 
 ## 6. Verification recipe
 
@@ -225,6 +239,23 @@ git grep -c "BluePilot:" -- '*.py' '*.cc' '*.h' '*.sh' '*.toml' | awk -F: '{s+=$
 
 # 6. after a rename-heavy sync, grep for the OLD names explicitly
 git grep -n "usbgpu\|UsbGpu\|egpu\.png" -- '*.py'
+
+# 7. if the panda gitlink moved, compile its firmware against OUR opendbc (see 5g).
+#    Needs arm-none-eabi-gcc (brew install --cask gcc-arm-embedded). Stub the two
+#    generated headers that panda/SConscript would normally write:
+git diff <old-ref> HEAD -- panda          # any output -> run the rest
+cd panda && mkdir -p board/obj && echo '#pragma once' > board/obj/cert.h \
+  && printf '#pragma once\nconst uint8_t gitversion[2]="x";\n' > board/obj/gitversion.h
+F=(-mcpu=cortex-m7 -mhard-float -mfpu=fpv5-d16 -mthumb -DSTM32H7 -DSTM32H725xx
+   -DALLOW_DEBUG -DHEALTH_PACKET_VERSION=0x1U -DCAN_PACKET_VERSION_HASH=0x1U
+   -Wall -Wextra -Wstrict-prototypes -Werror -nostdlib -fno-builtin -std=gnu11
+   -Os -fsyntax-only -I. -Iboard/stm32h7/inc -I../opendbc_repo)
+arm-none-eabi-gcc $F board/main.c && arm-none-eabi-gcc $F -DPANDA_BODY board/body/main.c
+#    -fmax-errors is deliberately NOT set, so you see every break, not just the first.
+#    Compare against upstream's pinned opendbc to tell our staleness from a real bug:
+#    git archive <sp opendbc pin> opendbc/safety | tar -x -C /tmp/spodbc, then -I/tmp/spodbc.
+#    Clean up with `git -C panda clean -fdx board/obj`, NOT rm -rf: board/obj/.placeholder
+#    is tracked, and deleting it leaves the panda submodule dirty.
 ```
 
 Notes on writing checkers, learned the hard way:
@@ -295,6 +326,14 @@ grep -ah "is dead with" /data/log/* | tail
 # which process manager thinks should be running but isn't
 grep -ah "process_not_running" /data/log/* | tail -3
 ```
+
+**"Install stuck at ~90%" is usually a failed build, not a hang.** `bp_build.py`
+retries a failed scons run twice (`-j4`, then `-j1`). Each retry rebuilds whatever
+was still in flight, and the tinygrad model compile alone takes many minutes. So
+one compile error can mean a long stall near the top of the bar, then a restart,
+before the failure screen appears. Look for the error before assuming a hang. It is
+in the spinner's log view (`bp_build.py` streams every scons line into it).
+On the 2026-11 sync it was the panda/opendbc break in 5g.
 
 `dmesg` does **not** survive a reboot — capture it before rebooting or the OOM
 evidence is gone. Params under `/data/params/d/` flagged `CLEAR_ON_MANAGER_START`
