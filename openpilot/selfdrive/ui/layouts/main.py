@@ -85,7 +85,6 @@ class MainLayout(Widget):
                                     "on_network": lambda: self.open_settings(PanelType.NETWORK)} if is_bluepilot() else {}),
                                 open_settings=lambda: self.open_settings(PanelType.TOGGLES))
     self._layouts[MainState.HOME]._setup_widget.set_open_settings_callback(lambda: self.open_settings(PanelType.FIREHOSE))
-    self._layouts[MainState.HOME].set_settings_callback(lambda: self.open_settings(PanelType.TOGGLES))
     # BluePilot: model info click opens Models settings panel
     if is_bluepilot() and hasattr(self._layouts[MainState.HOME], 'set_model_settings_callback'):
       self._layouts[MainState.HOME].set_model_settings_callback(lambda: self.open_settings(PanelType.MODELS))
