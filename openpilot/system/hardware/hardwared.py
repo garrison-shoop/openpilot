@@ -56,6 +56,12 @@ class Chestnut:
     self.last_attempt = 0.
     self.flashed = False
     self.mismatch = False
+    # BluePilot: PCIe link state, i.e. whether a GPU is actually in the dock. Distinct from
+    # chestnutPresent, which only means the ASM bridge enumerated over USB.
+    self.link_up = False
+    self._link_thread: threading.Thread | None = None
+    self._last_link_probe = 0.
+    # End BluePilot
 
   @property
   def flashing(self) -> bool:
@@ -64,13 +70,6 @@ class Chestnut:
   @property
   def failed(self) -> bool:
     return self.mismatch and self.attempts >= self.MAX_ATTEMPTS and self.thread is not None and not self.thread.is_alive() and not self.flashed
-
-    # BluePilot: PCIe link state, i.e. whether a GPU is actually in the dock. Distinct from
-    # chestnutPresent, which only means the ASM bridge enumerated over USB.
-    self.link_up = False
-    self._link_thread: threading.Thread | None = None
-    self._last_link_probe = 0.
-    # End BluePilot
 
   # BluePilot: offroad PCIe link probing -- see update_link
   def _probe_link(self) -> None:
