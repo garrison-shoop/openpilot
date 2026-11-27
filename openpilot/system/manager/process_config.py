@@ -49,8 +49,12 @@ def prev_route_car() -> tuple[str, str]:
   manager evaluates process gates against the live `carParams` message, which card only
   publishes once it has fingerprinted the car -- about six seconds into a boot. Any gate
   that keys off the brand is therefore wrong for those six seconds, which is long enough
-  for the device GPS daemon to start, claim the topic, and be killed again.
-  CarParamsPersistent is written by card on every drive and survives reboots.
+  for ubloxd/pigeond to start, claim gpsLocationExternal, and be killed again.
+  CarParamsPersistent is written by card on every drive and survives reboots, so on any
+  boot after the first in a given car it supplies the brand immediately.
+
+  Cached for the life of the process: card is the only writer, and by the time it has run
+  the live CP is available and takes precedence below anyway.
   """
   cp_bytes = Params().get("CarParamsPersistent")
   if cp_bytes is None:
@@ -70,21 +74,35 @@ def _car_identity(CP: car.CarParams) -> tuple[str, str]:
 def can_gps_capable(started: bool, params: Params, CP: car.CarParams) -> bool:
   """Could CAN GPS work here at all? Ford is the only brand whose DBC carries a fix.
 
-  Deliberately not gated on ublox_available(): cangpsd resolves its topic through
-  get_gps_location_service(), the same call the consumers make, so it is useful on both
-  ublox and Quectel devices. Whichever device GPS daemon owns that topic yields below.
+  Deliberately not gated on ublox_available(). It was, back when cangpsd hardcoded
+  gpsLocationExternal -- where that probe is false every consumer reads gpsLocation instead,
+  so the publish reached nobody and the toggle only looked like it worked. cangpsd now
+  resolves its topic through get_gps_location_service(), the same call the consumers make,
+  so it is useful either way; whichever device GPS daemon owns that topic yields below.
   """
   brand, _ = _car_identity(CP)
   return started and brand == "ford"
 
 def cangpsd(started: bool, params: Params, CP: car.CarParams) -> bool:
-  """Run the daemon -- as publisher when it is the selected source, else as an observer."""
+  """Run the daemon -- as the publisher when it is the selected source, else as an observer.
+
+  Two independent flags, so the automatic path can be trialled without disturbing anyone
+  relying on the manual one. FordPrefUseVehicleGps forces CAN GPS on, as it always has;
+  FordPrefAutoVehicleGps hands the choice to cangps_fallback, which needs the daemon
+  running even while the device receiver still owns the topic, so it has something to
+  compare against.
+  """
   if not can_gps_capable(started, params, CP):
     return False
   return params.get_bool("FordPrefUseVehicleGps") or params.get_bool("FordPrefAutoVehicleGps")
 
 def can_gps_publishing(started: bool, params: Params, CP: car.CarParams) -> bool:
-  """Does cangpsd own the GPS topic right now? If so the device GPS daemon stands down."""
+  """Does cangpsd own the GPS topic right now? If so the device GPS daemon stands down.
+
+  Which daemon that is follows ublox_available(): ubloxd/pigeond when it is true, qcomgpsd
+  when it is not. Both gates below consult this, and observer mode deliberately does not
+  reach it -- an observer publishes nothing, so nothing has to yield to it.
+  """
   if not can_gps_capable(started, params, CP):
     return False
   if params.get_bool("FordPrefUseVehicleGps"):
