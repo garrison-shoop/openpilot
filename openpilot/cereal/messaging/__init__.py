@@ -156,12 +156,13 @@ class FrequencyTracker:
     self.prev_time = 0.0
 
   def record_recv_time(self, cur_time: float) -> None:
-    # TODO: Handle case where cur_time is less than prev_time
+    # Skip non-positive dt: zero/negative deltas would poison the moving average
+    # (and crash `valid` with a division by zero). Clock going backwards is also handled here.
     if self.prev_time > 1e-5:
       dt = cur_time - self.prev_time
-
-      self.avg_dt.add_value(dt)
-      self.recent_avg_dt.add_value(dt)
+      if dt > 0.0:
+        self.avg_dt.add_value(dt)
+        self.recent_avg_dt.add_value(dt)
 
     self.prev_time = cur_time
 
@@ -170,11 +171,19 @@ class FrequencyTracker:
     if self.avg_dt.count == 0:
       return False
 
-    avg_freq = 1.0 / self.avg_dt.get_average()
+    avg_dt_mean = self.avg_dt.get_average()
+    if avg_dt_mean <= 0.0:
+      return False
+
+    avg_freq = 1.0 / avg_dt_mean
     if self.min_freq <= avg_freq <= self.max_freq:
       return True
 
-    avg_freq_recent = 1.0 / self.recent_avg_dt.get_average()
+    recent_avg_dt_mean = self.recent_avg_dt.get_average()
+    if recent_avg_dt_mean <= 0.0:
+      return False
+
+    avg_freq_recent = 1.0 / recent_avg_dt_mean
     return self.min_freq <= avg_freq_recent <= self.max_freq
 
 
