@@ -350,6 +350,9 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"show_lead_speed", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"FordPrefShowRadarLeadOverlay", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"FordPrefRadarOverlaySize", {PERSISTENT | BACKUP, INT, "1"}},
+    {"FordPrefUseVehicleGps", {PERSISTENT | BACKUP, BOOL, "0"}},  // CAN GPS: cangpsd owns the GPS topic
+    {"FordPrefAutoVehicleGps", {PERSISTENT | BACKUP, BOOL, "0"}},  // CAN GPS: let cangpsd pick the source instead
+    {"CanGpsFallbackState", {PERSISTENT | BACKUP, JSON, "{}"}},  // CAN GPS: which source cangpsd picked, per vehicle
     {"FordPrefHybridBatteryStatus", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"FordPrefHybridPowerFlow", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"FordPrefHybridDriveGaugeSize", {PERSISTENT | BACKUP, INT, "1"}},
