@@ -29,6 +29,7 @@ from openpilot.common.bluepilot import is_bluepilot
 if is_bluepilot():
   from openpilot.selfdrive.ui.bp.layouts.settings.bluepilot import BluePilotLayout
   from openpilot.selfdrive.ui.bp.layouts.settings.bp_web_panel import BPWebPanel
+  from openpilot.selfdrive.ui.bp.layouts.settings.developer_bp import DeveloperLayoutBP as DeveloperLayoutSP  # adds external storage
 from openpilot.system.ui.lib.application import gui_app, MousePos
 from openpilot.system.ui.lib.multilang import tr_noop
 from openpilot.system.ui.lib.text_measure import measure_text_cached
