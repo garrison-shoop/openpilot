@@ -200,6 +200,16 @@ if is_bluepilot():
     PythonProcess("bp_route_preprocessor", "bluepilot.backend.routes.preprocessor", _bp_route_preprocessor_enabled),
   ]
 
+  # BluePilot: CAN GPS (Ford). The gates live in bluepilot.system.cangps_gates; the device GPS daemons
+  # keep their stock gates, wrapped so they stand down while cangpsd owns the GPS topic.
+  from openpilot.bluepilot.system.cangps_gates import cangpsd as _cangpsd_gate, yield_to_cangpsd
+  from openpilot.bluepilot.system.process_bp import RestartOnExitPythonProcess
+  for _p in procs:
+    if _p.name in ("ubloxd", "pigeond", "qcomgpsd"):
+      _p.should_run = yield_to_cangpsd(_p.should_run)
+  procs += [RestartOnExitPythonProcess("cangpsd", "bluepilot.system.cangpsd", _cangpsd_gate, enabled=COMMA_HARDWARE)]
+  # End BluePilot
+
 if os.path.exists("../../sunnypilot/sunnylink/uploader.py"):
   procs += [PythonProcess("sunnylink_uploader", "openpilot.sunnypilot.sunnylink.uploader", use_sunnylink_uploader_shim)]
 
