@@ -14,6 +14,7 @@ import time
 import pyray as rl
 from collections.abc import Callable
 from openpilot.cereal import log
+import openpilot.cereal.messaging as messaging
 from openpilot.common.params import Params
 from openpilot.selfdrive.ui.ui_state import ui_state, ChestnutState
 from openpilot.selfdrive.ui.sunnypilot.layouts.sidebar import SidebarSP
@@ -44,6 +45,8 @@ NETWORK_TYPES = {
 # Update intervals (in frames at 20Hz UI rate)
 METRICS_UPDATE_INTERVAL = 20  # ~1 second
 PARAMS_UPDATE_INTERVAL = 40   # ~2 seconds
+LTSSM_L0 = 0x78  # chestnutState.pcieLtssm when the dock's PCIe link is trained, i.e. a GPU is seated and powered
+EGPU_DIM_OPACITY = 0.25  # the chestnut icon when the dock is connected but no GPU is linked
 
 
 class SidebarBP(Widget):
@@ -76,6 +79,13 @@ class SidebarBP(Widget):
     self._cpu_temp = "N/A"
     self._gpu_usage = "0%"
     self._gpu_temp = "N/A"
+
+    # eGPU (chestnut): replaces the integrated GPU card while a dock is connected. ui_state doesn't
+    # subscribe to chestnutState, so the sidebar keeps its own subscriber instead of editing ui_state.
+    self._egpu_sm: messaging.SubMaster | None = None
+    self._egpu_usage = "N/A"
+    self._egpu_temp = "N/A"
+    self._egpu_link: bool | None = None  # None: no telemetry yet (e.g. dock firmware not flashed), so unknown
     self._memory_usage = "0%"
     self._fan_demand = "0%"
 
@@ -343,6 +353,8 @@ class SidebarBP(Widget):
       gpu_usage = device_state.gpuUsagePercent
       self._gpu_usage = f"{gpu_usage:.0f}%"
 
+      self._update_egpu_metrics()
+
       # Memory
       mem_usage = device_state.memoryUsagePercent
       self._memory_usage = f"{mem_usage:.0f}%"
@@ -354,6 +366,49 @@ class SidebarBP(Widget):
     except Exception:
       # Gracefully handle missing data
       pass
+
+  def _update_egpu_metrics(self):
+    """eGPU telemetry from upstream's chestnutState (hardwared's chestnut_state_thread).
+
+    pcieLtssm is read from the dock whenever its firmware is current, onroad or off, so it tells an
+    empty dock from a seated GPU without any probing of our own. Usage and temperature are only
+    filled in while modeld runs the big model (it publishes chestnutGpuState, which hardwared merges
+    in); until then those fields are zero, so a zero hotspot temperature means "not reporting".
+    """
+    self._egpu_link = None
+    self._egpu_usage = self._egpu_temp = "N/A"
+    try:
+      if self._egpu_sm is None:
+        self._egpu_sm = messaging.SubMaster(['chestnutState'])
+      self._egpu_sm.update(0)
+      if not (self._egpu_sm.alive['chestnutState'] and self._egpu_sm.valid['chestnutState']):
+        return
+      state = self._egpu_sm['chestnutState']
+      self._egpu_link = state.pcieLtssm == LTSSM_L0
+      if self._egpu_link and state.tempC > 0:
+        self._egpu_usage = f"{state.gpuUsagePercent:.0f}%"
+        # tempC is the hotspot (junction) sensor, which runs well above the edge temperature
+        self._egpu_temp = f"{state.tempC:.1f}\u00b0C"
+    except Exception:
+      self._egpu_link = None
+      self._egpu_usage = self._egpu_temp = "N/A"
+
+  def _egpu_card_data(self) -> MetricData:
+    if self._egpu_link is False:
+      return MetricData("EGPU", "", "N/A", "NO GPU", BPColors.DISABLED)
+    if self._egpu_temp == "N/A":
+      return MetricData("EGPU", "", self._egpu_usage, self._egpu_temp, BPColors.DISABLED)
+    color = BPColors.GOOD
+    try:
+      # hotspot thresholds, not edge: AMD parts idle in the 50s and sit in the 80s under load
+      temp_val = float(self._egpu_temp.replace("\u00b0C", ""))
+      if temp_val > 100:
+        color = BPColors.DANGER
+      elif temp_val > 90:
+        color = BPColors.WARNING
+    except ValueError:
+      pass
+    return MetricData("EGPU", "", self._egpu_usage, self._egpu_temp, color)
 
   def _update_sunnylink_status(self):
     """Update SunnyLink status"""
@@ -404,7 +459,10 @@ class SidebarBP(Widget):
         gpu_color = BPColors.WARNING
     except ValueError:
       pass
-    self._gpu_card.set_data(MetricData("GPU", "", self._gpu_usage, self._gpu_temp, gpu_color))
+    if ui_state.chestnut_state != ChestnutState.DISCONNECTED:
+      self._gpu_card.set_data(self._egpu_card_data())  # the eGPU instead of the integrated GPU while a dock is connected
+    else:
+      self._gpu_card.set_data(MetricData("GPU", "", self._gpu_usage, self._gpu_temp, gpu_color))
 
     # Memory card
     mem_color = BPColors.GOOD
@@ -530,6 +588,11 @@ class SidebarBP(Widget):
     # BluePilot: chestnut status above the buttons while one is connected; display only
     if ui_state.chestnut_state != ChestnutState.DISCONNECTED:
       icon, _, opacity = self._chestnut._get_home_icon(self._chestnut._chestnut_default_img)
+      # sunnypilot's states can't tell an empty dock from a seated GPU (chestnutPresent only means the
+      # bridge enumerated); dim the icon when telemetry says the PCIe link is down. FAILED stays bright so
+      # a big-model failure is never masked, and unknown (no telemetry) is not treated as "no GPU".
+      if self._egpu_link is False and ui_state.chestnut_state != ChestnutState.FAILED:
+        opacity = min(opacity, EGPU_DIM_OPACITY)
       scale = btn_size / icon.width
       pos = rl.Vector2(self._btn_x, bottom_y + (btn_size - icon.height * scale) / 2)
       rl.draw_texture_ex(icon, pos, 0.0, scale, rl.Color(255, 255, 255, int(255 * opacity)))
